@@ -50,6 +50,7 @@ class TbaiIsaacGymInterface {
 
     void setCurrentCommand(const torch::Tensor &command, const torch::Tensor &envIds);
 
+
     torch::Tensor &getOptimizedStates();
     torch::Tensor &getUpdatedInSeconds();
     torch::Tensor &getConsistencyReward();
@@ -81,6 +82,14 @@ class TbaiIsaacGymInterface {
     SystemObservation getCurrentObservation(scalar_t time, int envId) const;
 
    private:
+    void loadModeSequenceTemplates(const std::string &gaitFile, const std::string &gaitName);
+
+    void createInterfaces(const std::string &taskFile, const std::string &urdfFile, const std::string &referenceFile);
+
+    void allocateInterfaceBuffers();
+    void allocateEigenBuffers();
+    void allocateTorchBuffers();
+
     void updateNextOptimizationTimeImpl(scalar_t time, int envId);
     scalar_t computeConsistencyReward(const PrimalSolution &previousSolution, const PrimalSolution &currentSolution);
 
@@ -95,12 +104,11 @@ class TbaiIsaacGymInterface {
     torch::Tensor consistencyRewards_;
     std::vector<PrimalSolution> solutions_;
 
-    std::vector<std::unique_ptr<LeggedRobotInterface>> interfaces_;
+    std::vector<std::unique_ptr<LeggedRobotInterface>> interfacePtrs_;
     std::vector<std::unique_ptr<SqpSolver>> solvers_;
     std::vector<std::unique_ptr<PinocchioInterface>> pinocchioInterfaces_;
     std::vector<std::unique_ptr<PinocchioEndEffectorKinematics>> endEffectorKinematics_;
     std::vector<std::unique_ptr<CentroidalModelPinocchioMapping>> centroidalModelMappings_;
-    std::vector<std::unique_ptr<PinocchioCentroidalDynamics>> centroidalDynamics_;
 
     torch::Tensor desiredContacts_;
     torch::Tensor timeLeftInPhase_;
@@ -132,7 +140,7 @@ class TbaiIsaacGymInterface {
     // MPC horizon in seconds
     scalar_t horizon_;
 
-    std::vector<std::unique_ptr<ocs2::legged_robot::ModeSequenceTemplate>> modeSequenceTemplates_;
+    std::unique_ptr<ocs2::legged_robot::ModeSequenceTemplate> modeSequenceTemplate_;
 };
 
 }  // namespace bindings
