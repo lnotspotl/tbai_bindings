@@ -150,7 +150,7 @@ TEST(Combined, RoundTripEig2Torch2Eig) {
 
     for (int i = 0; i < m.rows(); i++) {
         for (int j = 0; j < m.cols(); j++) {
-            EXPECT_NEAR(m(i, j), m2(i,j), 1e-6);
+            EXPECT_NEAR(m(i, j), m2(i, j), 1e-6);
         }
     }
 }

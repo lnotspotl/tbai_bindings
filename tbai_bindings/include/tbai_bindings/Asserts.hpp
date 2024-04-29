@@ -2,7 +2,7 @@
 #define TBAI_BINDINGS_ASSERT(condition, message)
 #else
 
-#define TBAI_BINDINGS_ASSERT(condition, message)                                                                           \
+#define TBAI_BINDINGS_ASSERT(condition, message)                                                                  \
     do {                                                                                                          \
         if (!(condition)) {                                                                                       \
             std::cerr << "\n"                                                                                     \

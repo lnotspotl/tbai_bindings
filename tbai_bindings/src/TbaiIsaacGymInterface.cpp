@@ -337,49 +337,9 @@ void TbaiIsaacGymInterface::updateDesiredJointAngles(scalar_t time, const torch:
     threadPool_.submit_loop(0, static_cast<int>(envIds.numel()), impl).wait();
 }
 
-torch::Tensor &TbaiIsaacGymInterface::getOptimizedStates() {
-    return optimizedStates_;
-}
-
-torch::Tensor &TbaiIsaacGymInterface::getUpdatedInSeconds() {
-    return updateInSeconds_;
-}
-
-torch::Tensor &TbaiIsaacGymInterface::getConsistencyReward() {
-    return consistencyRewards_;
-}
-
-torch::Tensor &TbaiIsaacGymInterface::getPlanarFootHolds() {
-    return desiredFootholds_;
-}
-
-torch::Tensor &TbaiIsaacGymInterface::getDesiredJointPositions() {
-    return desiredJointAngles_;
-}
-
-torch::Tensor &TbaiIsaacGymInterface::getDesiredContacts() {
-    return desiredContacts_;
-}
-
-torch::Tensor &TbaiIsaacGymInterface::getTimeLeftInPhase() {
-    return timeLeftInPhase_;
-}
-
-torch::Tensor &TbaiIsaacGymInterface::getCurrentDesiredJointPositions() {
-    return currentDesiredJointAngles_;
-}
-
 const LeggedRobotInterface &TbaiIsaacGymInterface::getInterface(int i) const {
-    // Check that index is within bounds
-    if (i < 0 || i >= numEnvs_) {
-        throw std::runtime_error("Index out of bounds");
-    }
-
-    // Check that interface is initialized
-    if (interfacePtrs_[i] == nullptr) {
-        throw std::runtime_error("Interface not initialized");
-    }
-
+    TBAI_BINDINGS_ASSERT(i >= 0 && i < numEnvs_, "Index out of bounds");
+    TBAI_BINDINGS_ASSERT(interfacePtrs_[i] != nullptr, "Interface not initialized");
     return *interfacePtrs_[i];
 }
 
@@ -583,25 +543,6 @@ void TbaiIsaacGymInterface::moveDesiredBaseToGpu() {
     desiredBaseAngularVelocities_ = tbai::bindings::matrix2torch(desiredBaseAngularVelocitiesCpu_).to(device_);
     desiredBaseLinearAccelerations_ = tbai::bindings::matrix2torch(desiredBaseLinearAccelerationsCpu_).to(device_);
     desiredBaseAngularAccelerations_ = tbai::bindings::matrix2torch(desiredBaseAngularAccelerationsCpu_).to(device_);
-}
-
-torch::Tensor &TbaiIsaacGymInterface::getDesiredBasePositions() {
-    return desiredBasePositions_;
-}
-torch::Tensor &TbaiIsaacGymInterface::getDesiredBaseOrientations() {
-    return desiredBaseOrientations_;
-}
-torch::Tensor &TbaiIsaacGymInterface::getDesiredBaseLinearVelocities() {
-    return desiredBaseLinearVelocities_;
-}
-torch::Tensor &TbaiIsaacGymInterface::getDesiredBaseAngularVelocities() {
-    return desiredBaseAngularVelocities_;
-}
-torch::Tensor &TbaiIsaacGymInterface::getDesiredBaseLinearAccelerations() {
-    return desiredBaseLinearAccelerations_;
-}
-torch::Tensor &TbaiIsaacGymInterface::getDesiredBaseAngularAccelerations() {
-    return desiredBaseAngularAccelerations_;
 }
 
 }  // namespace bindings

@@ -42,7 +42,6 @@ PYBIND11_MODULE(ig_interface, m) {
         .def("get_time_left_in_phase", &TbaiIsaacGymInterface::getTimeLeftInPhase)
         .def("get_current_observation", &TbaiIsaacGymInterface::getCurrentObservation)
         .def("get_current_optimal_trajectory", &TbaiIsaacGymInterface::getCurrentOptimalTrajectory)
-        .def("get_interface", &TbaiIsaacGymInterface::getInterface, py::return_value_policy::reference)
         .def("update_current_desired_joint_angles", &TbaiIsaacGymInterface::updateCurrentDesiredJointAngles)
         .def("get_current_desired_joint_positions", &TbaiIsaacGymInterface::getCurrentDesiredJointPositions)
         .def("get_desired_base_positions", &TbaiIsaacGymInterface::getDesiredBasePositions)

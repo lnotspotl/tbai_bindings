@@ -10,7 +10,6 @@
 #include <Eigen/Dense>
 #include <ocs2_centroidal_model/CentroidalModelPinocchioMapping.h>
 #include <ocs2_centroidal_model/PinocchioCentroidalDynamics.h>
-#include <tbai_bindings/Types.hpp>
 #include <ocs2_core/misc/LinearInterpolation.h>
 #include <ocs2_core/reference/TargetTrajectories.h>
 #include <ocs2_legged_robot/LeggedRobotInterface.h>
@@ -19,6 +18,7 @@
 #include <ocs2_pinocchio_interface/PinocchioEndEffectorKinematics.h>
 #include <ocs2_pinocchio_interface/PinocchioInterface.h>
 #include <ocs2_sqp/SqpSolver.h>
+#include <tbai_bindings/Types.hpp>
 #include <torch/extension.h>
 #include <torch/torch.h>
 
@@ -36,59 +36,53 @@ class TbaiIsaacGymInterface {
                           const std::string &gaitFile, const std::string &gaitName, int numEnvs, int numThreads,
                           torch::Device device = torch::kCPU);
 
+    /** Public interface **/
     void resetAllSolvers(scalar_t time);
     void resetSolvers(scalar_t time, const torch::Tensor &envIds);
-
     void updateCurrentStates(const torch::Tensor &newStates);
     void updateCurrentStates(const torch::Tensor &newStates, const torch::Tensor &envIds);
-
     void updateOptimizedStates(scalar_t time);
     void updateOptimizedStates(scalar_t time, const torch::Tensor &envIds);
-
     void optimizeTrajectories(scalar_t time);
     void optimizeTrajectories(scalar_t time, const torch::Tensor &envIds);
-
     void setCurrentCommand(const torch::Tensor &command, const torch::Tensor &envIds);
-
-
-    torch::Tensor &getOptimizedStates();
-    torch::Tensor &getUpdatedInSeconds();
-    torch::Tensor &getConsistencyReward();
-
-    torch::Tensor &getPlanarFootHolds();
-    torch::Tensor &getDesiredJointPositions();
-    torch::Tensor &getDesiredContacts();
-    torch::Tensor &getTimeLeftInPhase();
-    torch::Tensor &getCurrentDesiredJointPositions();
-
-    torch::Tensor &getDesiredBasePositions();
-    torch::Tensor &getDesiredBaseOrientations();
-    torch::Tensor &getDesiredBaseLinearVelocities();
-    torch::Tensor &getDesiredBaseAngularVelocities();
-    torch::Tensor &getDesiredBaseLinearAccelerations();
-    torch::Tensor &getDesiredBaseAngularAccelerations();
-
-    const LeggedRobotInterface &getInterface(int i) const;
     void updateDesiredContacts(scalar_t time, const torch::Tensor &envIds);
     void updateTimeLeftInPhase(scalar_t time, const torch::Tensor &envIds);
     void updateDesiredJointAngles(scalar_t time, const torch::Tensor &envIds);
     void updateCurrentDesiredJointAngles(scalar_t time, const torch::Tensor &envIds);
     void updateNextOptimizationTime(scalar_t time, const torch::Tensor &envIds);
-
     void updateDesiredBase(scalar_t time, const torch::Tensor &envIds);
     void moveDesiredBaseToGpu();
+
+    /** Getters **/
+    torch::Tensor &getOptimizedStates() { return optimizedStates_; }
+    torch::Tensor &getUpdatedInSeconds() { return updateInSeconds_; }
+    torch::Tensor &getConsistencyReward() { return consistencyRewards_; }
+    torch::Tensor &getPlanarFootHolds() { return desiredFootholds_; }
+    torch::Tensor &getDesiredJointPositions() { return desiredJointAngles_; }
+    torch::Tensor &getDesiredContacts() { return desiredContacts_; }
+    torch::Tensor &getTimeLeftInPhase() { return timeLeftInPhase_; }
+    torch::Tensor &getCurrentDesiredJointPositions() { return currentDesiredJointAngles_; }
+    torch::Tensor &getDesiredBasePositions() { return desiredBasePositions_; }
+    torch::Tensor &getDesiredBaseOrientations() { return desiredBaseOrientations_; }
+    torch::Tensor &getDesiredBaseLinearVelocities() { return desiredBaseLinearVelocities_; }
+    torch::Tensor &getDesiredBaseAngularVelocities() { return desiredBaseAngularVelocities_; }
+    torch::Tensor &getDesiredBaseLinearAccelerations() { return desiredBaseLinearAccelerations_; }
+    torch::Tensor &getDesiredBaseAngularAccelerations() { return desiredBaseAngularAccelerations_; }
 
     PrimalSolution getCurrentOptimalTrajectory(int envId) const;
     SystemObservation getCurrentObservation(scalar_t time, int envId) const;
 
    private:
-    void loadModeSequenceTemplates(const std::string &gaitFile, const std::string &gaitName);
-
-    void createInterfaces(const std::string &taskFile, const std::string &urdfFile, const std::string &referenceFile);
-
     void allocateInterfaceBuffers();
     void allocateEigenBuffers();
     void allocateTorchBuffers();
+
+    const LeggedRobotInterface &getInterface(int i) const;
+
+    void loadModeSequenceTemplates(const std::string &gaitFile, const std::string &gaitName);
+
+    void createInterfaces(const std::string &taskFile, const std::string &urdfFile, const std::string &referenceFile);
 
     void updateNextOptimizationTimeImpl(scalar_t time, int envId);
     scalar_t computeConsistencyReward(const PrimalSolution &previousSolution, const PrimalSolution &currentSolution);
