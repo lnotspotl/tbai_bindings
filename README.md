@@ -1,4 +1,4 @@
-# tbai_dtc_bindings
+# tbai_bindings
 Towards better athletic intelligence
 
 # Project structure
