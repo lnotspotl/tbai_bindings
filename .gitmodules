@@ -1,3 +1,6 @@
 [submodule "dependencies/ocs2"]
 	path = dependencies/ocs2
 	url = git@github.com:lnotspotl/ocs2.git
+[submodule "dependencies/pybind11_catkin"]
+	path = dependencies/pybind11_catkin
+	url = git@github.com:wxmerkt/pybind11_catkin.git
