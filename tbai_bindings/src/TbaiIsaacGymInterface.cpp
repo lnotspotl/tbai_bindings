@@ -121,6 +121,11 @@ void TbaiIsaacGymInterface::createInterfaces(const std::string &taskFile, const 
             pinocchioInterface, centroidalModelMapping, interface.modelSettings().contactNames3DoF);
         auto &endEffectorKinematics = *endEffectorKinematicsPtrs_[i];
         endEffectorKinematics.setPinocchioInterface(pinocchioInterface);
+
+        // Setup centroidal model RBD conversions
+        PinocchioInterface pinint_temp(interface.getPinocchioInterface());
+        centroidalModelRbdConversionsPtrs_[i] =
+            std::make_unique<CentroidalModelRbdConversions>(pinint_temp, interface.getCentroidalModelInfo());
     };
 
     // Create all interfaces
@@ -133,6 +138,7 @@ void TbaiIsaacGymInterface::allocateInterfaceBuffers() {
     pinocchioInterfacePtrs_.resize(numEnvs_);
     endEffectorKinematicsPtrs_.resize(numEnvs_);
     centroidalModelMappingPtrs_.resize(numEnvs_);
+    centroidalModelRbdConversionsPtrs_.resize(numEnvs_);
     solutions_.resize(numEnvs_);
 }
 
@@ -500,69 +506,37 @@ void TbaiIsaacGymInterface::updateDesiredBase(scalar_t time, const torch::Tensor
         int id = envIds[i].item<int>();
         auto &solution = solutions_[id];
 
-        // Desired base position
-        vector3_t desiredBasePosition =
-            LinearInterpolation::interpolate(time, solution.timeTrajectory_, solution.stateTrajectory_).segment<3>(6);
-        desiredBasePositionsCpu_.row(id) = desiredBasePosition;
-
-        // Desired base orientation
-        vector3_t desiredBaseEulerAngles =
-            LinearInterpolation::interpolate(time, solution.timeTrajectory_, solution.stateTrajectory_).segment<3>(9);
-        auto quat = ocs2::getQuaternionFromEulerAnglesZyx<scalar_t>(desiredBaseEulerAngles);
-        vector_t desiredBaseOrientation = (vector_t(4) << quat.x(), quat.y(), quat.z(), quat.w()).finished();
-        desiredBaseOrientationsCpu_.row(id) = desiredBaseOrientation;
-
-        // Get desired state and input
+        // compute desired MPC state and input
         vector_t desiredState =
             LinearInterpolation::interpolate(time, solution.timeTrajectory_, solution.stateTrajectory_);
         vector_t desiredInput =
             LinearInterpolation::interpolate(time, solution.timeTrajectory_, solution.inputTrajectory_);
 
-        // Update centroidal dynamics
-        auto &pinocchioInterface = *pinocchioInterfacePtrs_[id];
-        auto &pinocchioMapping = *centroidalModelMappingPtrs_[id];
-        auto &modelInfo = pinocchioMapping.getCentroidalModelInfo();
-        vector_t q = pinocchioMapping.getPinocchioJointPosition(desiredState);
-        ocs2::updateCentroidalDynamics(pinocchioInterface, modelInfo, q);
+        // Calculate desired base kinematics and dynamics
+        using Vector6 = Eigen::Matrix<scalar_t, 6, 1>;
+        Vector6 basePose, baseVelocity, baseAcceleration;
+        vector_t jointAccelerations = vector_t::Zero(12);
+        centroidalModelRbdConversionsPtrs_[id]->computeBaseKinematicsFromCentroidalModel(
+            desiredState, desiredInput, jointAccelerations, basePose, baseVelocity, baseAcceleration);
 
-        // Compute desired base linear velocity
-        vector3_t desiredBaseLinearVelocity =
-            pinocchioMapping.getPinocchioJointVelocity(desiredState, desiredInput).segment<3>(0);
-        // std::cout << "Desired base linear velocity: " << desiredBaseLinearVelocity << std::endl;
-        // std::cout << "Desired base linear velocity from state" << desiredState.segment<3>(0) << std::endl;
-        // std::cout << "Desired base position: " << desiredBasePosition.transpose() << std::endl;
+        // Unpack data
+        vector3_t desiredBasePosition = basePose.head<3>();
+        vector3_t desiredBaseOrientation = basePose.tail<3>();  // zyx euler angles
+
+        vector3_t desiredBaseLinearVelocity = baseVelocity.head<3>();
+        vector3_t desiredBaseAngularVelocity = baseVelocity.tail<3>();
+
+        vector3_t desiredBaseLinearAcceleration = baseAcceleration.head<3>();
+        vector3_t desiredBaseAngularAcceleration = baseAcceleration.tail<3>();
+
+        // Update desired base
+        desiredBasePositionsCpu_.row(id) = desiredBasePosition;
+        desiredBaseOrientationsCpu_.row(id) =
+            ocs2::getQuaternionFromEulerAnglesZyx<scalar_t>(desiredBaseOrientation).coeffs();
         desiredBaseLinearVelocitiesCpu_.row(id) = desiredBaseLinearVelocity;
-
-        // Compute desired base angular velocity
-        vector3_t desiredEulerAngleDerivatives = pinocchioMapping.getPinocchioJointVelocity(desiredState, desiredInput)
-                                                     .segment<3>(3);  // TODO: convert to local frame
-        vector3_t desiredBaseAngularVelocity = ocs2::getGlobalAngularVelocityFromEulerAnglesZyxDerivatives<scalar_t>(
-            desiredBaseEulerAngles, desiredEulerAngleDerivatives);
         desiredBaseAngularVelocitiesCpu_.row(id) = desiredBaseAngularVelocity;
-
-        // Compute desired base linear acceleration
-        const scalar_t robotMass = modelInfo.robotMass;
-        auto Ag = getCentroidalMomentumMatrix(pinocchioInterface);  // centroidal momentum matrix as in (h = A * q_dot)
-        vector_t h_dot_normalized = getNormalizedCentroidalMomentumRate(pinocchioInterface, modelInfo, desiredInput);
-        vector_t h_dot = robotMass * h_dot_normalized;
-
-        // pinocchio position and velocity
-        vector_t v = pinocchioMapping.getPinocchioJointVelocity(desiredState, desiredInput);
-        matrix_t Ag_dot = pinocchio::dccrba(pinocchioInterface.getModel(), pinocchioInterface.getData(), q, v);
-
-        Eigen::Matrix<scalar_t, 6, 6> Ag_base = Ag.template leftCols<6>();
-        auto Ag_base_inv = computeFloatingBaseCentroidalMomentumMatrixInverse(Ag_base);
-
-        // TODO: Is this calculation correct?
-        vector_t baseAcceleration =
-            Ag_base_inv * (h_dot - Ag_dot.template leftCols<6>() * v.head<6>());  // - A_j * q_ddot_joints
-        vector3_t baseLinearAcceleration = baseAcceleration.head<3>();
-        desiredBaseLinearAccelerationsCpu_.row(id) = baseLinearAcceleration;
-
-        vector3_t eulerZyxAcceleration = baseAcceleration.segment<3>(3);  // euler zyx acceleration
-        vector3_t baseAngularAcceleration = getGlobalAngularAccelerationFromEulerAnglesZyxDerivatives(
-            desiredBaseEulerAngles, desiredEulerAngleDerivatives, eulerZyxAcceleration);
-        desiredBaseAngularAccelerationsCpu_.row(id) = baseAngularAcceleration;
+        desiredBaseLinearAccelerationsCpu_.row(id) = desiredBaseLinearAcceleration;
+        desiredBaseAngularAccelerationsCpu_.row(id) = desiredBaseAngularAcceleration;
     };
 
     threadPool_.submit_loop(0, static_cast<int>(envIds.numel()), impl).wait();

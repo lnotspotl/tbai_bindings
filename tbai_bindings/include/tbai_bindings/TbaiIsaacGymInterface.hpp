@@ -14,6 +14,7 @@
 #include <Eigen/Dense>
 #include <ocs2_centroidal_model/CentroidalModelPinocchioMapping.h>
 #include <ocs2_centroidal_model/PinocchioCentroidalDynamics.h>
+#include <ocs2_centroidal_model/CentroidalModelRbdConversions.h>
 #include <ocs2_core/misc/LinearInterpolation.h>
 #include <ocs2_core/reference/TargetTrajectories.h>
 #include <ocs2_legged_robot/LeggedRobotInterface.h>
@@ -118,6 +119,7 @@ class TbaiIsaacGymInterface {
     std::vector<std::unique_ptr<PinocchioInterface>> pinocchioInterfacePtrs_;
     std::vector<std::unique_ptr<PinocchioEndEffectorKinematics>> endEffectorKinematicsPtrs_;
     std::vector<std::unique_ptr<CentroidalModelPinocchioMapping>> centroidalModelMappingPtrs_;
+    std::vector<std::unique_ptr<CentroidalModelRbdConversions>> centroidalModelRbdConversionsPtrs_;
 
     torch::Tensor currentStates_;
     torch::Tensor currentCommands_;
