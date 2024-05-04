@@ -83,6 +83,9 @@ class TbaiIsaacGymInterface {
     PrimalSolution getCurrentOptimalTrajectory(int envId) const;
     SystemObservation getCurrentObservation(scalar_t time, int envId) const;
 
+    // Make sure to call this function only after updateDesiredContacts has been called
+    torch::Tensor getBobnetPhases(scalar_t time, const torch::Tensor &envIds);
+
     // Move relevant tensors to CPU and convert them to Eigen data types
     void toCpu();
 

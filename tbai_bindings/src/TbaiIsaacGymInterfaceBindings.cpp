@@ -52,7 +52,8 @@ PYBIND11_MODULE(tbai_ocs2_interface, m) {
         .def("get_desired_base_angular_accelerations", &TbaiIsaacGymInterface::getDesiredBaseAngularAccelerations)
         .def("update_desired_base", &TbaiIsaacGymInterface::updateDesiredBase)
         .def("move_desired_base_to_gpu", &TbaiIsaacGymInterface::moveDesiredBaseToGpu)
-        .def("visualize", &TbaiIsaacGymInterface::visualize, "time"_a, "state"_a, "envId"_a, "obs"_a);
+        .def("visualize", &TbaiIsaacGymInterface::visualize, "time"_a, "state"_a, "envId"_a, "obs"_a)
+        .def("get_bobnet_phases", &TbaiIsaacGymInterface::getBobnetPhases);
 
     // Helper class
     py::class_<SystemObservation>(m, "SystemObservation");

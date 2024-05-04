@@ -335,7 +335,8 @@ void TbaiIsaacGymInterface::updateCurrentDesiredJointAngles(scalar_t time, const
         int id = envIds[i].item<int>();
         auto &solution = solutions_[id];
         auto &modeSchedule = solution.modeSchedule_;
-        currentDesiredJointAnglesCpu_.row(i) = LinearInterpolation::interpolate(time, solution.timeTrajectory_, solution.stateTrajectory_).segment<12>(12);
+        currentDesiredJointAnglesCpu_.row(i) =
+            LinearInterpolation::interpolate(time, solution.timeTrajectory_, solution.stateTrajectory_).segment<12>(12);
     };
     threadPool_.submit_loop(0, static_cast<int>(envIds.numel()), impl).wait();
     currentDesiredJointAngles_ = tbai::bindings::matrix2torch(currentDesiredJointAnglesCpu_).to(device_);
@@ -584,6 +585,37 @@ void TbaiIsaacGymInterface::visualize(scalar_t time, torch::Tensor &state, int e
     std::copy(obsCpu.data(), obsCpu.data() + obsCpu.size(), std::back_inserter(msg.obs));
 
     pub_.publish(msg);
+}
+
+torch::Tensor TbaiIsaacGymInterface::getBobnetPhases(scalar_t time, const torch::Tensor &envIds) {
+    // Make sure that updateDesiredContacts has been called before
+    matrix_t phases = matrix_t::Zero(envIds.numel(), 4);
+    auto impl = [&](int i) {
+        int id = envIds[i].item<int>();
+        auto &solution = solutions_[id];
+        auto &modeSchedule = solution.modeSchedule_;
+
+        auto currentContacts = desiredContactsCpu_.row(id).cast<bool>();
+        auto contactPhases = ocs2::legged_robot::getContactPhasePerLeg(time, modeSchedule);
+        auto swingPhases = ocs2::legged_robot::getSwingPhasePerLeg(time, modeSchedule);
+
+        // LH, RF - phase in [0, PI]
+        // LF, RH - phase in [PI, 2*PI]
+        // Basically when LF lifts off the phase is 0
+        constexpr scalar_t PI = 3.14159265358979323846;
+        for (int j = 0; j < 4; ++j) {
+            if (currentContacts(j)) {
+                phases(i, j) = PI + contactPhases[j].phase * PI;
+            } else {
+                phases(i, j) = swingPhases[j].phase * PI;
+            }
+
+            if(phases(i, j) > 2*PI) phases(i, j) -= 2*PI;
+            if(phases(i, j) < 0) phases(i, j) += 2*PI;
+        }
+    };
+    threadPool_.submit_loop(0, static_cast<int>(envIds.numel()), impl).wait();
+    return tbai::bindings::matrix2torch(phases).to(device_);
 }
 
 }  // namespace bindings
