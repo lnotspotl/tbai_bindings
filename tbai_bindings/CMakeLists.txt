@@ -69,10 +69,10 @@ add_library(${PROJECT_NAME}
   src/TbaiIsaacGymInterface.cpp
 )
 target_link_libraries(${PROJECT_NAME} ${catkin_LIBRARIES} ${TORCH_LIBRARIES} ${Python3_LIBRARIES} ${pinocchio_LIBRARIES} ${OTHER_LIBRARIES})
-pybind11_add_module(ig_interface SHARED
+pybind11_add_module(tbai_ocs2_interface SHARED
   src/TbaiIsaacGymInterfaceBindings.cpp
 )    
-target_link_libraries(ig_interface PRIVATE
+target_link_libraries(tbai_ocs2_interface PRIVATE
     ${TORCH_LIBRARIES}
     ${Python_LIBRARIES}
     ${PROJECT_NAME}
@@ -86,7 +86,7 @@ add_executable(visualizer src/visualizer.cpp)
 target_link_libraries(visualizer ${PROJECT_NAME})
 
 # Install the python module
-install(TARGETS ig_interface
+install(TARGETS tbai_ocs2_interface
   ARCHIVE DESTINATION ${CMAKE_SOURCE_DIR}/out
   LIBRARY DESTINATION ${CMAKE_SOURCE_DIR}/out
   RUNTIME DESTINATION ${CMAKE_SOURCE_DIR}/out

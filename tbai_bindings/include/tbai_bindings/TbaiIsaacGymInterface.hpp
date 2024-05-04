@@ -138,6 +138,13 @@ class TbaiIsaacGymInterface {
     matrix_t desiredBaseLinearAccelerationsCpu_;
     matrix_t desiredBaseAngularAccelerationsCpu_;
 
+    matrix_t desiredContactsCpu_;
+    matrix_t timeLeftInPhaseCpu_;
+    matrix_t desiredJointAnglesCpu_;
+    matrix_t desiredFootHoldsCpu_;
+    matrix_t currentDesiredJointAnglesCpu_;
+    matrix_t desiredStatesCpu_;
+
     torch::Tensor desiredBasePositions_;
     torch::Tensor desiredBaseOrientations_;
     torch::Tensor desiredBaseLinearVelocities_;

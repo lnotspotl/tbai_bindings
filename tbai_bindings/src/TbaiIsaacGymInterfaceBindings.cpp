@@ -5,7 +5,7 @@
 
 using namespace pybind11::literals;
 
-PYBIND11_MODULE(ig_interface, m) {
+PYBIND11_MODULE(tbai_ocs2_interface, m) {
     using namespace tbai::bindings;
 
     m.doc() = "Interface for ocs2's trajectory optimization module for legged robots.";

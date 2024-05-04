@@ -155,6 +155,13 @@ void TbaiIsaacGymInterface::allocateEigenBuffers() {
     desiredBaseLinearAccelerationsCpu_ = matrix_t::Zero(numEnvs_, 3);
     desiredBaseAngularAccelerationsCpu_ = matrix_t::Zero(numEnvs_, 3);
 
+    desiredContactsCpu_ = matrix_t::Zero(numEnvs_, 4);       // LF, RF, LH, RH
+    timeLeftInPhaseCpu_ = matrix_t::Zero(numEnvs_, 4);       // LF, RF, LH, RH
+    desiredJointAnglesCpu_ = matrix_t::Zero(numEnvs_, 12);   // 3 joints per leg
+    desiredFootHoldsCpu_ = matrix_t::Zero(numEnvs_, 4 * 2);  // x, y per foot
+    currentDesiredJointAnglesCpu_ = matrix_t::Zero(numEnvs_, 12);
+    desiredStatesCpu_ = matrix_t::Zero(numEnvs_, 12 + 12);
+
     initialState_ = interfacePtrs_[0]->getInitialState();
 }
 
@@ -205,10 +212,11 @@ void TbaiIsaacGymInterface::updateDesiredContacts(scalar_t time, const torch::Te
         auto referenceManagerPtr = interfacePtrs_[id]->getSwitchedModelReferenceManagerPtr();
         auto contactFlags = referenceManagerPtr->getContactFlags(time);
         for (int j = 0; j < 4; ++j) {
-            desiredContacts_.index({id, j}) = contactFlags[j];
+            desiredContactsCpu_(id, j) = static_cast<scalar_t>(contactFlags[j]);
         }
     };
     threadPool_.submit_loop(0, static_cast<int>(envIds.numel()), impl).wait();
+    desiredContacts_ = tbai::bindings::matrix2torch(desiredContactsCpu_).to(device_);
 }
 
 void TbaiIsaacGymInterface::updateTimeLeftInPhase(scalar_t time, const torch::Tensor &envIds) {
@@ -218,23 +226,24 @@ void TbaiIsaacGymInterface::updateTimeLeftInPhase(scalar_t time, const torch::Te
         auto &solution = solutions_[id];
         auto &modeSchedule = solution.modeSchedule_;
 
-        auto currentContacts = desiredContacts_.index({id}).to(torch::kBool).to(torch::kCPU);
+        auto currentContacts = desiredContactsCpu_.row(id).cast<bool>();
         auto contactPhases = ocs2::legged_robot::getContactPhasePerLeg(time, modeSchedule);
         auto swingPhases = ocs2::legged_robot::getSwingPhasePerLeg(time, modeSchedule);
 
         for (int j = 0; j < 4; ++j) {
-            if (currentContacts.index({j}).item<bool>()) {
+            if (currentContacts(j)) {
                 auto legPhase = contactPhases[j];
-                timeLeftInPhase_.index({id, j}) = (1.0 - legPhase.phase) * legPhase.duration;
+                timeLeftInPhaseCpu_(id, j) = (1.0 - legPhase.phase) * legPhase.duration;
             } else {
                 auto legPhase = swingPhases[j];
-                timeLeftInPhase_.index({id, j}) = (1.0 - legPhase.phase) * legPhase.duration;
+                timeLeftInPhaseCpu_(id, j) = (1.0 - legPhase.phase) * legPhase.duration;
             }
 
-            if (std::isnan(timeLeftInPhase_.index({id, j}).item<float>())) timeLeftInPhase_.index({id, j}) = 0.0;
+            if (std::isnan(timeLeftInPhaseCpu_(id, j))) timeLeftInPhaseCpu_(id, j) = 0.0;
         }
     };
     threadPool_.submit_loop(0, static_cast<int>(envIds.numel()), impl).wait();
+    timeLeftInPhase_ = tbai::bindings::matrix2torch(timeLeftInPhaseCpu_).to(device_);
 }
 
 void TbaiIsaacGymInterface::updateOptimizedStates(scalar_t time) {
@@ -276,10 +285,10 @@ void TbaiIsaacGymInterface::updateOptimizedStates(scalar_t time, const torch::Te
     auto updateOptimizedStates = [&](int i) {
         int id = envIds[i].item<int>();
         const auto &p = this->solutions_[id];
-        vector_t desiredState = LinearInterpolation::interpolate(time, p.timeTrajectory_, p.stateTrajectory_);
-        this->optimizedStates_[id] = tbai::bindings::vector2torch(desiredState).to(device_);
+        desiredStatesCpu_.row(id) = LinearInterpolation::interpolate(time, p.timeTrajectory_, p.stateTrajectory_);
     };
     threadPool_.submit_loop(0, static_cast<int>(envIds.numel()), updateOptimizedStates).wait();
+    optimizedStates_ = tbai::bindings::matrix2torch(desiredStatesCpu_).to(device_);
 }
 
 void TbaiIsaacGymInterface::optimizeTrajectories(scalar_t time) {
@@ -326,16 +335,10 @@ void TbaiIsaacGymInterface::updateCurrentDesiredJointAngles(scalar_t time, const
         int id = envIds[i].item<int>();
         auto &solution = solutions_[id];
         auto &modeSchedule = solution.modeSchedule_;
-        for (int j = 0; j < 4; ++j) {
-            auto state = LinearInterpolation::interpolate(time, solution.timeTrajectory_, solution.stateTrajectory_);
-            auto jointAngles = state.segment<12>(12);
-
-            // Update desired joint angles
-            torch::indexing::Slice slice(3 * j, 3 * (j + 1));
-            currentDesiredJointAngles_.index({id, slice}) = tbai::bindings::vector2torch(jointAngles.segment<3>(3 * j));
-        }
+        currentDesiredJointAnglesCpu_.row(i) = LinearInterpolation::interpolate(time, solution.timeTrajectory_, solution.stateTrajectory_).segment<12>(12);
     };
     threadPool_.submit_loop(0, static_cast<int>(envIds.numel()), impl).wait();
+    currentDesiredJointAngles_ = tbai::bindings::matrix2torch(currentDesiredJointAnglesCpu_).to(device_);
 }
 
 void TbaiIsaacGymInterface::updateDesiredJointAngles(scalar_t time, const torch::Tensor &envIds) {
@@ -345,15 +348,15 @@ void TbaiIsaacGymInterface::updateDesiredJointAngles(scalar_t time, const torch:
         auto &solution = solutions_[id];
         auto &modeSchedule = solution.modeSchedule_;
         for (int j = 0; j < 4; ++j) {
-            float timeLeft = timeLeftInPhase_.index({id, j}).item<float>();
+            scalar_t timeLeft = timeLeftInPhaseCpu_(id, j);
 
             auto state =
                 LinearInterpolation::interpolate(time + timeLeft, solution.timeTrajectory_, solution.stateTrajectory_);
             auto jointAngles = state.segment<12>(12);
 
             // Update desired joint angles
+            desiredJointAnglesCpu_.row(id).segment<3>(3 * j) = jointAngles.segment<3>(3 * j);
             torch::indexing::Slice slice(3 * j, 3 * (j + 1));
-            desiredJointAngles_.index({id, slice}) = tbai::bindings::vector2torch(jointAngles.segment<3>(3 * j));
 
             // Compute forward kinematics
             auto &pinocchioMapping = *centroidalModelMappingPtrs_[id];
@@ -367,12 +370,12 @@ void TbaiIsaacGymInterface::updateDesiredJointAngles(scalar_t time, const torch:
             auto positions = endEffector.getPosition(vector_t());
 
             // Update desired footholds
-            torch::indexing::Slice slice2(2 * j, 2 * (j + 1));
-            desiredFootholds_.index({id, slice2}) = tbai::bindings::vector2torch(positions[j].head<2>());
+            desiredFootHoldsCpu_.row(id).segment<2>(2 * j) = positions[j].head<2>();
         }
     };
-
     threadPool_.submit_loop(0, static_cast<int>(envIds.numel()), impl).wait();
+    desiredJointAngles_ = tbai::bindings::matrix2torch(desiredJointAnglesCpu_).to(device_);
+    desiredFootholds_ = tbai::bindings::matrix2torch(desiredFootHoldsCpu_).to(device_);
 }
 
 const LeggedRobotInterface &TbaiIsaacGymInterface::getInterface(int i) const {
