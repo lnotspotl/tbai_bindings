@@ -1,5 +1,8 @@
-#include "tbai_bindings/TbaiIsaacGymInterface.hpp"
+// clang-format off
+#include <pinocchio/fwd.hpp>
+// clang-format on
 
+#include "tbai_bindings/TbaiIsaacGymInterface.hpp"
 #include "tbai_bindings/Utils.hpp"
 #include <ocs2_centroidal_model/AccessHelperFunctions.h>
 #include <ocs2_centroidal_model/ModelHelperFunctions.h>
@@ -9,10 +12,16 @@
 #include <ocs2_legged_robot/gait/LegLogic.h>
 #include <ocs2_robotic_tools/common/RotationDerivativesTransforms.h>
 #include <ocs2_robotic_tools/common/RotationTransforms.h>
+#include <ocs2_ros_interfaces/common/RosMsgConversions.h>
 #include <pinocchio/algorithm/centroidal.hpp>
 #include <pinocchio/algorithm/frames.hpp>
-#include <pinocchio/fwd.hpp>
-#include <tbai_bindings/Asserts.hpp>
+#include <ros/ros.h>
+#include <tbai_bindings/Macros.hpp>
+
+// This is a bit of a hack
+#define protected public
+#define private public
+#include <ocs2_ros_interfaces/mpc/MPC_ROS_Interface.h>
 
 using namespace ocs2;
 
@@ -22,25 +31,46 @@ namespace bindings {
 TbaiIsaacGymInterface::TbaiIsaacGymInterface(const std::string &taskFile, const std::string &urdfFile,
                                              const std::string &referenceFile, const std::string &gaitFile,
                                              const std::string &gaitName, int numEnvs, int numThreads,
-                                             torch::Device device)
-    : numEnvs_(numEnvs), numThreads_(numThreads), threadPool_(numThreads), device_(device) {
+                                             torch::Device device, bool visualize)
+    : numEnvs_(numEnvs), numThreads_(numThreads), threadPool_(numThreads), device_(device), visualize_(visualize) {
     // Perform simple checks
     if (numEnvs < 1) throw std::runtime_error("Number of environments must be at least 1");
     if (numThreads < 1) throw std::runtime_error("Number of threads must be at least 1");
 
+    TBAI_BINDINGS_PRINT("Loading mode sequence template for gait" << gaitName);
+
     // Load mode sequence from config file
     loadModeSequenceTemplates(gaitFile, "trot");
+
+    TBAI_BINDINGS_PRINT("Allocating interface buffers and creating interfaces");
 
     // Create all the necessary interfaces
     allocateInterfaceBuffers();
     createInterfaces(taskFile, urdfFile, referenceFile);
 
+    TBAI_BINDINGS_PRINT("Allocating eigen buffers");
+
     // Allocate memory for buffers
     allocateEigenBuffers();
+
+    TBAI_BINDINGS_PRINT("Allocating torch buffers");
+
     allocateTorchBuffers();
+
+    TBAI_BINDINGS_PRINT("Loading MPC prediction horizon");
 
     // Get prediction horizon
     horizon_ = interfacePtrs_[0]->mpcSettings().timeHorizon_;
+
+    TBAI_BINDINGS_PRINT("Horizon: " << horizon_ << " seconds");
+
+    if (visualize_) {
+        int argc = 1;
+        char *argv[] = {(char *)"tbai_bindings"};
+        ros::init(argc, argv, "tbai_bindings");
+        ros::NodeHandle nodeHandle;
+        pub_ = nodeHandle.advertise<tbai_bindings::bindings_visualize>("visualize", 1);
+    }
 }
 
 void TbaiIsaacGymInterface::resetAllSolvers(scalar_t time) {
@@ -49,7 +79,7 @@ void TbaiIsaacGymInterface::resetAllSolvers(scalar_t time) {
 
 void TbaiIsaacGymInterface::loadModeSequenceTemplates(const std::string &gaitFile, const std::string &gaitName) {
     auto temp = loadModeSequenceTemplate(gaitFile, gaitName, false);  // last argument is verbose
-    std::make_unique<ModeSequenceTemplate>(temp.switchingTimes, temp.modeSequence);
+    modeSequenceTemplate_ = std::make_unique<ModeSequenceTemplate>(temp.switchingTimes, temp.modeSequence);
 }
 
 void TbaiIsaacGymInterface::createInterfaces(const std::string &taskFile, const std::string &urdfFile,
@@ -67,9 +97,9 @@ void TbaiIsaacGymInterface::createInterfaces(const std::string &taskFile, const 
         auto &interface = *interfacePtrs_[i];
 
         // Create SQP solver
-        solvers_[i] = std::make_unique<SqpSolver>(interface.sqpSettings(), interface.getOptimalControlProblem(),
-                                                  interface.getInitializer());
-        auto &solver = *solvers_[i];
+        solverPtrs_[i] = std::make_unique<SqpSolver>(interface.sqpSettings(), interface.getOptimalControlProblem(),
+                                                     interface.getInitializer());
+        auto &solver = *solverPtrs_[i];
         solver.setReferenceManager(interface.getReferenceManagerPtr());
 
         // Set gait
@@ -77,19 +107,19 @@ void TbaiIsaacGymInterface::createInterfaces(const std::string &taskFile, const 
         referenceManager->getGaitSchedule()->insertModeSequenceTemplate(*modeSequenceTemplate_, -horizon_, horizon_);
 
         // Setup pinocchio interface
-        pinocchioInterfaces_[i] = std::make_unique<PinocchioInterface>(interface.getPinocchioInterface());
-        auto &pinocchioInterface = *pinocchioInterfaces_[i];
+        pinocchioInterfacePtrs_[i] = std::make_unique<PinocchioInterface>(interface.getPinocchioInterface());
+        auto &pinocchioInterface = *pinocchioInterfacePtrs_[i];
 
         // Setup centroidal model mapping
-        centroidalModelMappings_[i] =
+        centroidalModelMappingPtrs_[i] =
             std::make_unique<CentroidalModelPinocchioMapping>(interface.getCentroidalModelInfo());
-        auto &centroidalModelMapping = *centroidalModelMappings_[i];
+        auto &centroidalModelMapping = *centroidalModelMappingPtrs_[i];
         centroidalModelMapping.setPinocchioInterface(pinocchioInterface);
 
         // Setup end effector kinematics for the feet
-        endEffectorKinematics_[i] = std::make_unique<PinocchioEndEffectorKinematics>(
+        endEffectorKinematicsPtrs_[i] = std::make_unique<PinocchioEndEffectorKinematics>(
             pinocchioInterface, centroidalModelMapping, interface.modelSettings().contactNames3DoF);
-        auto &endEffectorKinematics = *endEffectorKinematics_[i];
+        auto &endEffectorKinematics = *endEffectorKinematicsPtrs_[i];
         endEffectorKinematics.setPinocchioInterface(pinocchioInterface);
     };
 
@@ -99,17 +129,18 @@ void TbaiIsaacGymInterface::createInterfaces(const std::string &taskFile, const 
 
 void TbaiIsaacGymInterface::allocateInterfaceBuffers() {
     interfacePtrs_.resize(numEnvs_);
-    solvers_.resize(numEnvs_);
-    pinocchioInterfaces_.resize(numEnvs_);
-    endEffectorKinematics_.resize(numEnvs_);
-    centroidalModelMappings_.resize(numEnvs_);
+    solverPtrs_.resize(numEnvs_);
+    pinocchioInterfacePtrs_.resize(numEnvs_);
+    endEffectorKinematicsPtrs_.resize(numEnvs_);
+    centroidalModelMappingPtrs_.resize(numEnvs_);
+    solutions_.resize(numEnvs_);
 }
 
 void TbaiIsaacGymInterface::allocateEigenBuffers() {
     TBAI_BINDINGS_ASSERT(interfacePtrs_[0] != nullptr, "Interfaces not initialized. Call createInterfaces first");
 
-    currentStates_ = matrix_t::Zero(numEnvs_, 6 + 6 + 12);  // 6 momentum, 6 base pose, 12 joint angles
-    currentCommands_ = matrix_t::Zero(numEnvs_, 3);         // v_x, v_y, w_z
+    currentStatesCpu_ = matrix_t::Zero(numEnvs_, 6 + 6 + 12);  // 6 momentum, 6 base pose, 12 joint angles
+    currentCommandsCpu_ = matrix_t::Zero(numEnvs_, 3);         // v_x, v_y, w_z
 
     desiredBasePositionsCpu_ = matrix_t::Zero(numEnvs_, 3);
     desiredBaseOrientationsCpu_ = matrix_t::Zero(numEnvs_, 4);
@@ -141,23 +172,24 @@ void TbaiIsaacGymInterface::allocateTorchBuffers() {
 void TbaiIsaacGymInterface::resetSolvers(scalar_t time, const torch::Tensor &envIds) {
     auto resetSolver = [&](int i) {
         int id = envIds[i].item<int>();
-        solvers_[id]->reset();
+        solverPtrs_[id]->reset();
         solutions_[id].clear();
-        dynamic_cast<SwitchedModelReferenceManager *>(&solvers_[id]->getReferenceManager())
+        dynamic_cast<SwitchedModelReferenceManager *>(&solverPtrs_[id]->getReferenceManager())
             ->getGaitSchedule()
             ->insertModeSequenceTemplate(*modeSequenceTemplate_, time - horizon_, time + horizon_);
         updateInSeconds_[id] = 0.0;
     };
+
     threadPool_.submit_loop(0, static_cast<int>(envIds.numel()), resetSolver).wait();
 }
 
 void TbaiIsaacGymInterface::updateCurrentStates(const torch::Tensor &newStates) {
-    currentStates_ = torch2matrix(newStates.to(torch::kCPU));
+    currentStatesCpu_ = torch2matrix(newStates.to(torch::kCPU));
 }
 
 void TbaiIsaacGymInterface::updateCurrentStates(const torch::Tensor &newStates, const torch::Tensor &envIds) {
     auto state = torch2matrix(newStates.to(torch::kCPU));
-    auto updateState = [&](int i) { currentStates_.row(envIds[i].item<int>()) = state.row(i); };
+    auto updateState = [&](int i) { currentStatesCpu_.row(envIds[i].item<int>()) = state.row(i); };
     threadPool_.submit_loop(0, static_cast<int>(envIds.numel()), updateState).wait();
 }
 
@@ -254,10 +286,10 @@ void TbaiIsaacGymInterface::optimizeTrajectories(scalar_t time, const torch::Ten
         const auto &interface = *(this->interfacePtrs_[id].get());
         const scalar_t initTime = time;
         const scalar_t finalTime = initTime + horizon_;
-        auto initState = currentStates_.row(id);
+        auto initState = currentStatesCpu_.row(id);
         // auto initState = initialState_;
-        // initState.segment<6>(0) = currentStates_.row(id).segment<6>(0);
-        // initState.segment<6>(6) = currentStates_.row(id).segment<6>(6); // copy base position and orientation from
+        // initState.segment<6>(0) = currentStatesCpu_.row(id).segment<6>(0);
+        // initState.segment<6>(6) = currentStatesCpu_.row(id).segment<6>(6); // copy base position and orientation from
         // current state initState(8) = 0.54; // z position initState(10) = 0.0; // roll initState(11) = 0.0; // pitch
 
         // auto &prevSolution = this->solutions_[id];
@@ -271,10 +303,10 @@ void TbaiIsaacGymInterface::optimizeTrajectories(scalar_t time, const torch::Ten
         // std::cout << "Target trajectory" << std::endl;
         // std::cout << targetTrajectory << std::endl;
         // std::cout << std::endl;
-        this->solvers_[id]->getReferenceManager().setTargetTrajectories(targetTrajectory);
-        this->solvers_[id]->run(initTime, initState, finalTime);
+        this->solverPtrs_[id]->getReferenceManager().setTargetTrajectories(targetTrajectory);
+        this->solverPtrs_[id]->run(initTime, initState, finalTime);
         PrimalSolution temp;
-        this->solvers_[id]->getPrimalSolution(finalTime, &temp);
+        this->solverPtrs_[id]->getPrimalSolution(finalTime, &temp);
         this->consistencyRewards_.index({id}) = computeConsistencyReward(temp, this->solutions_[id]);
         this->solutions_[id].swap(temp);
         temp.clear();
@@ -318,14 +350,14 @@ void TbaiIsaacGymInterface::updateDesiredJointAngles(scalar_t time, const torch:
             desiredJointAngles_.index({id, slice}) = tbai::bindings::vector2torch(jointAngles.segment<3>(3 * j));
 
             // Compute forward kinematics
-            auto &pinocchioMapping = *centroidalModelMappings_[id];
-            auto &interface = *pinocchioInterfaces_[id];
+            auto &pinocchioMapping = *centroidalModelMappingPtrs_[id];
+            auto &interface = *pinocchioInterfacePtrs_[id];
             auto q = pinocchioMapping.getPinocchioJointPosition(state);
             pinocchio::forwardKinematics(interface.getModel(), interface.getData(), q);
             pinocchio::updateFramePlacements(interface.getModel(), interface.getData());
 
             // Update end effector kinematics
-            auto &endEffector = *endEffectorKinematics_[id];
+            auto &endEffector = *endEffectorKinematicsPtrs_[id];
             auto positions = endEffector.getPosition(vector_t());
 
             // Update desired footholds
@@ -345,7 +377,7 @@ const LeggedRobotInterface &TbaiIsaacGymInterface::getInterface(int i) const {
 
 void TbaiIsaacGymInterface::setCurrentCommand(const torch::Tensor &command_tensor, const torch::Tensor &envIds) {
     auto command = torch2matrix(command_tensor.to(torch::kCPU));
-    auto updateCommand = [&](int i) { currentCommands_.row(envIds[i].item<int>()) = command.row(i); };
+    auto updateCommand = [&](int i) { currentCommandsCpu_.row(envIds[i].item<int>()) = command.row(i); };
     threadPool_.submit_loop(0, static_cast<int>(envIds.numel()), updateCommand).wait();
 }
 
@@ -381,10 +413,10 @@ scalar_t TbaiIsaacGymInterface::computeConsistencyReward(const PrimalSolution &p
 TargetTrajectories TbaiIsaacGymInterface::getTargetTrajectory(scalar_t initTime, int envIdx) {
     const scalar_t finalTime = initTime + horizon_;
     // auto initState = initialState_;
-    auto currentState = currentStates_.row(envIdx);
+    auto currentState = currentStatesCpu_.row(envIdx);
     auto initState = currentState;
 
-    auto currentCommand = currentCommands_.row(envIdx);
+    auto currentCommand = currentCommandsCpu_.row(envIdx);
     const scalar_t v_x = currentCommand(0);
     const scalar_t v_y = currentCommand(1);
     const scalar_t w_z = currentCommand(2);
@@ -446,7 +478,7 @@ PrimalSolution TbaiIsaacGymInterface::getCurrentOptimalTrajectory(int envId) con
 }
 
 SystemObservation TbaiIsaacGymInterface::getCurrentObservation(scalar_t time, int envId) const {
-    vector_t currentState = currentStates_.row(envId);
+    vector_t currentState = currentStatesCpu_.row(envId);
     vector_t currentInput = vector_t::Zero(12 + 12);
     scalar_t currentTime = time;
 
@@ -487,8 +519,8 @@ void TbaiIsaacGymInterface::updateDesiredBase(scalar_t time, const torch::Tensor
             LinearInterpolation::interpolate(time, solution.timeTrajectory_, solution.inputTrajectory_);
 
         // Update centroidal dynamics
-        auto &pinocchioInterface = *pinocchioInterfaces_[id];
-        auto &pinocchioMapping = *centroidalModelMappings_[id];
+        auto &pinocchioInterface = *pinocchioInterfacePtrs_[id];
+        auto &pinocchioMapping = *centroidalModelMappingPtrs_[id];
         auto &modelInfo = pinocchioMapping.getCentroidalModelInfo();
         vector_t q = pinocchioMapping.getPinocchioJointPosition(desiredState);
         ocs2::updateCentroidalDynamics(pinocchioInterface, modelInfo, q);
@@ -543,6 +575,38 @@ void TbaiIsaacGymInterface::moveDesiredBaseToGpu() {
     desiredBaseAngularVelocities_ = tbai::bindings::matrix2torch(desiredBaseAngularVelocitiesCpu_).to(device_);
     desiredBaseLinearAccelerations_ = tbai::bindings::matrix2torch(desiredBaseLinearAccelerationsCpu_).to(device_);
     desiredBaseAngularAccelerations_ = tbai::bindings::matrix2torch(desiredBaseAngularAccelerationsCpu_).to(device_);
+}
+
+void TbaiIsaacGymInterface::visualize(scalar_t time, torch::Tensor &state, int envId, torch::Tensor &obs) {
+    if (!visualize_) {
+        TBAI_BINDINGS_PRINT("Visualize is disabled!");
+        return;
+    }
+
+    if (!ros::ok()) return;
+
+    // Get solution
+    auto &solution = solutions_[envId];
+    auto &perfIndices = solverPtrs_[envId]->getPerformanceIndeces();
+
+    // Generate system observation
+    SystemObservation observation;
+    observation.state = torch2vector(state);
+    observation.input = LinearInterpolation::interpolate(time, solution.timeTrajectory_, solution.inputTrajectory_);
+    observation.time = time;
+    CommandData commandData = {observation, solverPtrs_[envId]->getReferenceManager().getTargetTrajectories()};
+
+    tbai_bindings::bindings_visualize msg;
+    msg.observation = ocs2::ros_msg_conversions::createObservationMsg(observation);
+    auto &targetTrajectory = solverPtrs_[envId]->getReferenceManager().getTargetTrajectories();
+    msg.target_trajectories = ocs2::ros_msg_conversions::createTargetTrajectoriesMsg(targetTrajectory);
+    msg.flattened_controller = MPC_ROS_Interface::createMpcPolicyMsg(solution, commandData, perfIndices);
+
+    // Copy obs to msg
+    auto obsCpu = tbai::bindings::torch2vector(obs.to(torch::kCPU));
+    std::copy(obsCpu.data(), obsCpu.data() + obsCpu.size(), std::back_inserter(msg.obs));
+
+    pub_.publish(msg);
 }
 
 }  // namespace bindings

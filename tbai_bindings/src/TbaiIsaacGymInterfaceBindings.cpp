@@ -12,9 +12,9 @@ PYBIND11_MODULE(ig_interface, m) {
 
     py::class_<TbaiIsaacGymInterface>(m, "TbaiIsaacGymInterface")
         .def(py::init<const std::string &, const std::string &, const std::string &, const std::string &,
-                      const std::string &, int, int, torch::Device>(),
+                      const std::string &, int, int, torch::Device, bool>(),
              "taskFile"_a, "urdfFile"_a, "referenceFile"_a, "gaitFile"_a, "gaitName"_a, "numEnvs"_a, "numThreads"_a,
-             "device"_a)
+             "device"_a, "visualize"_a)
         .def("reset_solvers", &TbaiIsaacGymInterface::resetSolvers, "time"_a, "envIds"_a)
         .def("reset_all_solvers", &TbaiIsaacGymInterface::resetAllSolvers, "time"_a)
         .def("update_states",
@@ -51,7 +51,8 @@ PYBIND11_MODULE(ig_interface, m) {
         .def("get_desired_base_linear_accelerations", &TbaiIsaacGymInterface::getDesiredBaseLinearAccelerations)
         .def("get_desired_base_angular_accelerations", &TbaiIsaacGymInterface::getDesiredBaseAngularAccelerations)
         .def("update_desired_base", &TbaiIsaacGymInterface::updateDesiredBase)
-        .def("move_desired_base_to_gpu", &TbaiIsaacGymInterface::moveDesiredBaseToGpu);
+        .def("move_desired_base_to_gpu", &TbaiIsaacGymInterface::moveDesiredBaseToGpu)
+        .def("visualize", &TbaiIsaacGymInterface::visualize, "time"_a, "state"_a, "envId"_a, "obs"_a);
 
     // Helper class
     py::class_<SystemObservation>(m, "SystemObservation");

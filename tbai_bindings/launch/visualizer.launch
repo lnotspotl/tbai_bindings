@@ -1,0 +1,20 @@
+<launch>
+
+    <arg name="description_file"    default="$(find ocs2_robotic_assets)/resources/anymal_d/urdf/anymal.urdf"/>
+    <arg name="task_file" default="$(find ocs2_legged_robot)/config/mpc/task.info"/>
+    <arg name="reference_file" default="$(find ocs2_legged_robot)/config/command/reference.info"/>
+
+    <param name="task_file" value="$(arg task_file)" />
+    <param name="reference_file" value="$(arg reference_file)" />
+    <param name="urdf_file" value="$(arg description_file)" />
+
+    <param name="legged_robot_description" command="$(find xacro)/xacro --inorder $(arg description_file)" />
+
+    <!-- Visualizer node -->
+    <node name="visualize" pkg="tbai_bindings" type="visualizer" output="screen"/>
+
+    <!-- Rviz -->
+    <arg name="rvizconfig" default="$(find tbai_bindings)/launch/rviz/visualizer.rviz" />
+    <node pkg="rviz" type="rviz" name="rviz" args="-d $(arg rvizconfig)" output="screen" />
+
+</launch>

@@ -1,5 +1,9 @@
 #pragma once
 
+// clang-format off
+#include <pinocchio/fwd.hpp>
+// clang-format on
+
 #include <chrono>
 #include <memory>
 #include <string>
@@ -22,6 +26,9 @@
 #include <torch/extension.h>
 #include <torch/torch.h>
 
+#include <ros/ros.h>
+#include <tbai_bindings/bindings_visualize.h>
+
 namespace tbai {
 namespace bindings {
 
@@ -34,7 +41,7 @@ class TbaiIsaacGymInterface {
    public:
     TbaiIsaacGymInterface(const std::string &taskFile, const std::string &urdfFile, const std::string &referenceFile,
                           const std::string &gaitFile, const std::string &gaitName, int numEnvs, int numThreads,
-                          torch::Device device = torch::kCPU);
+                          torch::Device device = torch::kCPU, bool visualize = false);
 
     /** Public interface **/
     void resetAllSolvers(scalar_t time);
@@ -70,8 +77,16 @@ class TbaiIsaacGymInterface {
     torch::Tensor &getDesiredBaseLinearAccelerations() { return desiredBaseLinearAccelerations_; }
     torch::Tensor &getDesiredBaseAngularAccelerations() { return desiredBaseAngularAccelerations_; }
 
+    void visualize(scalar_t time, torch::Tensor &state, int envId, torch::Tensor &obs);
+
     PrimalSolution getCurrentOptimalTrajectory(int envId) const;
     SystemObservation getCurrentObservation(scalar_t time, int envId) const;
+
+    // Move relevant tensors to CPU and convert them to Eigen data types
+    void toCpu();
+
+    // Move relevant tensors to GPU
+    void toGpu();
 
    private:
     void allocateInterfaceBuffers();
@@ -92,17 +107,20 @@ class TbaiIsaacGymInterface {
     int numEnvs_;
     int numThreads_;
 
-    matrix_t currentStates_;
-    matrix_t currentCommands_;
+    matrix_t currentStatesCpu_;
+    matrix_t currentCommandsCpu_;
     torch::Tensor optimizedStates_;
     torch::Tensor consistencyRewards_;
     std::vector<PrimalSolution> solutions_;
 
     std::vector<std::unique_ptr<LeggedRobotInterface>> interfacePtrs_;
-    std::vector<std::unique_ptr<SqpSolver>> solvers_;
-    std::vector<std::unique_ptr<PinocchioInterface>> pinocchioInterfaces_;
-    std::vector<std::unique_ptr<PinocchioEndEffectorKinematics>> endEffectorKinematics_;
-    std::vector<std::unique_ptr<CentroidalModelPinocchioMapping>> centroidalModelMappings_;
+    std::vector<std::unique_ptr<SqpSolver>> solverPtrs_;
+    std::vector<std::unique_ptr<PinocchioInterface>> pinocchioInterfacePtrs_;
+    std::vector<std::unique_ptr<PinocchioEndEffectorKinematics>> endEffectorKinematicsPtrs_;
+    std::vector<std::unique_ptr<CentroidalModelPinocchioMapping>> centroidalModelMappingPtrs_;
+
+    torch::Tensor currentStates_;
+    torch::Tensor currentCommands_;
 
     torch::Tensor desiredContacts_;
     torch::Tensor timeLeftInPhase_;
@@ -131,10 +149,14 @@ class TbaiIsaacGymInterface {
 
     vector_t initialState_;
 
+    bool visualize_;
+
     // MPC horizon in seconds
     scalar_t horizon_;
 
     std::unique_ptr<ocs2::legged_robot::ModeSequenceTemplate> modeSequenceTemplate_;
+
+    ros::Publisher pub_;
 };
 
 }  // namespace bindings

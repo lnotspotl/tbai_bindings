@@ -1,7 +1,10 @@
 cmake_minimum_required(VERSION 3.0.2)
 project(tbai_bindings)
 
-set(Torch_DIR /home/kuba/Downloads/libtorch/share/cmake/Torch)
+set(LIBTORCH_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../dependencies/libtorch)
+set(LIBTORCH_INCLUDE_DIR ${LIBTORCH_DIR}/include)
+set(LIBTORCH_LIB_DIR ${LIBTORCH_DIR}/lib)
+set(LIBTORCH_CMAKE_DIR ${LIBTORCH_DIR}/share/cmake/Torch)
 
 find_package(catkin REQUIRED COMPONENTS
     ocs2_oc
@@ -11,6 +14,9 @@ find_package(catkin REQUIRED COMPONENTS
     ocs2_legged_robot
     ocs2_legged_robot_ros
     pybind11_catkin
+    ocs2_ros_interfaces
+    ocs2_msgs
+    message_generation
 )
 set(CMAKE_CXX_STANDARD 17)
 
@@ -23,12 +29,27 @@ find_package(pinocchio REQUIRED)
 find_package (Python3 3.8.18 COMPONENTS Interpreter Development)
 find_package(pybind11 REQUIRED)
 
-find_package(Torch REQUIRED)
+set(Torch_DIR ${LIBTORCH_CMAKE_DIR})
+find_package(Torch)
+if (NOT Torch_FOUND)
+    message(FATAL_ERROR "PyTorch Not Found! Move your libtorch to the ${LIBTORCH_DIR} folder.")
+endif()
+set(OTHER_LIBRARIES ${LIBTORCH_LIB_DIR}/libtorch_python.so)
+
+add_message_files(
+  FILES
+    bindings_visualize.msg
+)
+
+generate_messages(
+  DEPENDENCIES
+    ocs2_msgs
+)
 
 catkin_package(
   INCLUDE_DIRS include
   LIBRARIES  ${PROJECT_NAME} 
-  CATKIN_DEPENDS ocs2_oc ocs2_mpc ocs2_robotic_tools ocs2_centroidal_model ocs2_legged_robot ocs2_legged_robot_ros
+  CATKIN_DEPENDS ocs2_oc ocs2_mpc ocs2_robotic_tools ocs2_centroidal_model ocs2_legged_robot ocs2_legged_robot_ros  ocs2_msgs message_runtime
   DEPENDS 
 )
 
@@ -42,8 +63,6 @@ include_directories(
   ${pinocchio_INCLUDE_DIRS}
 )
 
-# Apparently, this is every important!!!
-set(OTHER_LIBRARIES /home/kuba/Downloads/libtorch/lib/libtorch_python.so)
 
 add_library(${PROJECT_NAME}
   src/Utils.cpp
@@ -59,6 +78,12 @@ target_link_libraries(ig_interface PRIVATE
     ${PROJECT_NAME}
     ${OTHER_LIBRARIES}
 )
+
+add_executable(main src/main.cpp)
+target_link_libraries(main ${PROJECT_NAME})
+
+add_executable(visualizer src/visualizer.cpp)
+target_link_libraries(visualizer ${PROJECT_NAME})
 
 # Install the python module
 install(TARGETS ig_interface
