@@ -162,6 +162,9 @@ void TbaiIsaacGymInterface::allocateEigenBuffers() {
     currentDesiredJointAnglesCpu_ = matrix_t::Zero(numEnvs_, 12);
     desiredStatesCpu_ = matrix_t::Zero(numEnvs_, 12 + 12);
 
+    desiredFootPositionsCpu_ = matrix_t::Zero(numEnvs_, 4 * 3);   // x, y, z per foot
+    desiredFootVelocitiesCpu_ = matrix_t::Zero(numEnvs_, 4 * 3);  // x, y, z per foot
+
     initialState_ = interfacePtrs_[0]->getInitialState();
 }
 
@@ -587,6 +590,49 @@ void TbaiIsaacGymInterface::visualize(scalar_t time, torch::Tensor &state, int e
     pub_.publish(msg);
 }
 
+void TbaiIsaacGymInterface::updateDesiredFootPositionsAndVelocities(scalar_t time, const torch::Tensor &envIds) {
+    auto impl = [&](int i) {
+        int id = envIds[i].item<int>();
+        auto &solution = solutions_[id];
+
+        // compute desired MPC state and input
+        vector_t desiredState =
+            LinearInterpolation::interpolate(time, solution.timeTrajectory_, solution.stateTrajectory_);
+        vector_t desiredInput =
+            LinearInterpolation::interpolate(time, solution.timeTrajectory_, solution.inputTrajectory_);
+
+        auto &pinocchioMapping = *centroidalModelMappingPtrs_[id];
+        auto &interface = *pinocchioInterfacePtrs_[id];
+        auto &info = interfacePtrs_[id]->getCentroidalModelInfo();
+
+        // Compute generalized coordinates ande velocities for pinocchio
+        vector_t qPinocchio = pinocchioMapping.getPinocchioJointPosition(desiredState);
+        ocs2::updateCentroidalDynamics(interface, info, qPinocchio);
+        vector_t vPinocchio = pinocchioMapping.getPinocchioJointVelocity(desiredState, desiredInput);
+
+        // // Update kinematics
+        const auto &model = interface.getModel();
+        auto &data = interface.getData();
+        pinocchio::forwardKinematics(model, data, qPinocchio);
+        pinocchio::updateFramePlacements(model, data);
+
+        // Retrieve ee positions and velocities
+        auto &endEffector = *endEffectorKinematicsPtrs_[id];
+        auto positions = endEffector.getPosition(vector_t());
+        auto velocities = endEffector.getVelocity(vector_t(), vector_t());
+
+        // LF, RF, LH, RH
+        for (int j = 0; j < 4; ++j) {
+            desiredFootPositionsCpu_.row(id).segment<3>(3 * j) = positions[j];
+            desiredFootVelocitiesCpu_.row(id).segment<3>(3 * j) = velocities[j];
+        }
+    };
+
+    threadPool_.submit_loop(0, static_cast<int>(envIds.numel()), impl).wait();
+    desiredFootPositions_ = tbai::bindings::matrix2torch(desiredFootPositionsCpu_).to(device_);
+    desiredFootVelocities_ = tbai::bindings::matrix2torch(desiredFootVelocitiesCpu_).to(device_);
+}
+
 torch::Tensor TbaiIsaacGymInterface::getBobnetPhases(scalar_t time, const torch::Tensor &envIds) {
     // Make sure that updateDesiredContacts has been called before
     matrix_t phases = matrix_t::Zero(envIds.numel(), 4);
@@ -610,8 +656,8 @@ torch::Tensor TbaiIsaacGymInterface::getBobnetPhases(scalar_t time, const torch:
                 phases(i, j) = swingPhases[j].phase * PI;
             }
 
-            if(phases(i, j) > 2*PI) phases(i, j) -= 2*PI;
-            if(phases(i, j) < 0) phases(i, j) += 2*PI;
+            if (phases(i, j) > 2 * PI) phases(i, j) -= 2 * PI;
+            if (phases(i, j) < 0) phases(i, j) += 2 * PI;
         }
     };
     threadPool_.submit_loop(0, static_cast<int>(envIds.numel()), impl).wait();
