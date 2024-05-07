@@ -60,6 +60,7 @@ class TbaiIsaacGymInterface {
     void updateCurrentDesiredJointAngles(scalar_t time, const torch::Tensor &envIds);
     void updateNextOptimizationTime(scalar_t time, const torch::Tensor &envIds);
     void updateDesiredBase(scalar_t time, const torch::Tensor &envIds);
+    void updateDesiredFootPositionsAndVelocities(scalar_t time, const torch::Tensor &envIds);
     void moveDesiredBaseToGpu();
 
     /** Getters **/
@@ -77,11 +78,16 @@ class TbaiIsaacGymInterface {
     torch::Tensor &getDesiredBaseAngularVelocities() { return desiredBaseAngularVelocities_; }
     torch::Tensor &getDesiredBaseLinearAccelerations() { return desiredBaseLinearAccelerations_; }
     torch::Tensor &getDesiredBaseAngularAccelerations() { return desiredBaseAngularAccelerations_; }
+    torch::Tensor &getDesiredFootPositions() { return desiredFootPositions_; }
+    torch::Tensor &getDesiredFootVelocities() { return desiredFootVelocities_; }
 
     void visualize(scalar_t time, torch::Tensor &state, int envId, torch::Tensor &obs);
 
     PrimalSolution getCurrentOptimalTrajectory(int envId) const;
     SystemObservation getCurrentObservation(scalar_t time, int envId) const;
+
+    // Make sure to call this function only after updateDesiredContacts has been called
+    torch::Tensor getBobnetPhases(scalar_t time, const torch::Tensor &envIds);
 
     // Move relevant tensors to CPU and convert them to Eigen data types
     void toCpu();
@@ -145,12 +151,18 @@ class TbaiIsaacGymInterface {
     matrix_t currentDesiredJointAnglesCpu_;
     matrix_t desiredStatesCpu_;
 
+    matrix_t desiredFootPositionsCpu_;
+    matrix_t desiredFootVelocitiesCpu_;
+
     torch::Tensor desiredBasePositions_;
     torch::Tensor desiredBaseOrientations_;
     torch::Tensor desiredBaseLinearVelocities_;
     torch::Tensor desiredBaseAngularVelocities_;
     torch::Tensor desiredBaseLinearAccelerations_;
     torch::Tensor desiredBaseAngularAccelerations_;
+
+    torch::Tensor desiredFootPositions_;
+    torch::Tensor desiredFootVelocities_;
 
     torch::Device device_;
 
