@@ -70,7 +70,44 @@ TbaiIsaacGymInterface::TbaiIsaacGymInterface(const std::string &taskFile, const 
         ros::init(argc, argv, "tbai_bindings");
         ros::NodeHandle nodeHandle;
         pub_ = nodeHandle.advertise<tbai_bindings::bindings_visualize>("visualize", 1);
+        gridmapInterfacePtr_ = std::make_unique<GridmapInterface>(true);
     }
+}
+
+void TbaiIsaacGymInterface::updateCurrentStatesPerceptive(const torch::Tensor &newStates, const torch::Tensor &envIds) {
+    auto state = torch2matrix(newStates.to(torch::kCPU));
+    auto updateImpl = [&](int i) {
+        int id = envIds[i].item<int>();
+        vector_t ocs2State = state.row(i);
+
+        vector_t zyx_euler = ocs2State.segment<3>(0).reverse();  // normal zyx (roll, pitch, yaw) euler angles
+
+        vector_t xyz_euler = mat2oc2rpy(rpy2mat(zyx_euler), lastYawCpu_[id]);
+        lastYawCpu_[id] = xyz_euler(2);
+
+        vector_t position = ocs2State.segment<3>(3);
+        vector_t localAngularVelocity = ocs2State.segment<3>(6);
+        vector_t localLinearVelocity = ocs2State.segment<3>(9);
+        vector_t jointAngles = ocs2State.segment<12>(12);
+        vector_t jointVelocities = ocs2State.segment<12>(24);
+
+        // Flip FH and RF
+        auto flipFHRF = [](vector_t &v) {
+            std::swap(v(3 + 0), v(3 + 3));
+            std::swap(v(3 + 1), v(3 + 4));
+            std::swap(v(3 + 2), v(3 + 5));
+        };
+        flipFHRF(jointAngles);
+        flipFHRF(jointVelocities);
+
+        if (id == 0) {
+            std::cout << "Current yaw is: " << lastYawCpu_[id] << std::endl;
+        }
+
+        currentStatesPerceptiveCpu_.row(id) << xyz_euler, position, localAngularVelocity, localLinearVelocity,
+            jointAngles, jointVelocities;
+    };
+    threadPool_.submit_loop(0, static_cast<int>(envIds.numel()), updateImpl).wait();
 }
 
 void TbaiIsaacGymInterface::resetAllSolvers(scalar_t time) {
@@ -89,6 +126,16 @@ void TbaiIsaacGymInterface::createInterfaces(const std::string &taskFile, const 
     // Create a dummy interface to compile all necessary libraries
     interfacePtrs_[0] = std::make_unique<LeggedRobotInterface>(taskFile, urdfFile, referenceFile);
     interfacePtrs_[0].reset();
+
+    // Dummy
+    const std::string quadrupedTaskFolder =
+        "/home/kuba/fun/tbai_bindings/src/tbai_bindings/dependencies/ocs2/ocs2_robotic_examples/"
+        "ocs2_perceptive_anymal/ocs2_anymal_mpc/config/c_series";
+    const std::string quadrupedUrdfPath =
+        "/home/kuba/fun/tbai_bindings/src/tbai_bindings/dependencies/ocs2_robotic_assets/resources/anymal_d/urdf/"
+        "anymal.urdf";
+    quadrupedInterfacePtrs_[0] = createQuadrupedInterface(quadrupedUrdfPath, quadrupedTaskFolder);
+    quadrupedInterfacePtrs_[0].reset();
 
     // Create the rest of the interfaces
     auto createInterface = [&](size_t i) {
@@ -126,6 +173,29 @@ void TbaiIsaacGymInterface::createInterfaces(const std::string &taskFile, const 
         PinocchioInterface pinint_temp(interface.getPinocchioInterface());
         centroidalModelRbdConversionsPtrs_[i] =
             std::make_unique<CentroidalModelRbdConversions>(pinint_temp, interface.getCentroidalModelInfo());
+
+        // Setup gridmap interface
+        gridmapInterfacesPtrs_[i] = std::make_unique<GridmapInterface>(false);
+
+        quadrupedInterfacePtrs_[i] = createQuadrupedInterface(quadrupedUrdfPath, quadrupedTaskFolder);
+
+        // Quadruped interface
+        auto &quadrupedInterface = *quadrupedInterfacePtrs_[i];
+
+        // Create SQP solver
+        const std::string sqpPath =
+            "/home/kuba/fun/tbai_bindings/src/tbai_bindings/dependencies/ocs2/ocs2_robotic_examples/"
+            "ocs2_perceptive_anymal/ocs2_anymal_mpc/config/c_series/multiple_shooting.info";
+        const auto sqpSettings = ocs2::sqp::loadSettings(sqpPath);
+        quadrupedSolverPtrs_[i] = std::make_unique<SqpSolver>(
+            sqpSettings, quadrupedInterface.getOptimalControlProblem(), quadrupedInterface.getInitializer());
+        auto &quadrupedSolver = *quadrupedSolverPtrs_[i];
+        quadrupedSolver.setReferenceManager(quadrupedInterface.getReferenceManagerPtr());
+
+        // Set gait
+        auto *quadrupedReference =
+            dynamic_cast<switched_model::SwitchedModelModeScheduleManager *>(&quadrupedSolver.getReferenceManager());
+        referenceManager->getGaitSchedule()->insertModeSequenceTemplate(*modeSequenceTemplate_, -horizon_, horizon_);
     };
 
     // Create all interfaces
@@ -140,13 +210,60 @@ void TbaiIsaacGymInterface::allocateInterfaceBuffers() {
     centroidalModelMappingPtrs_.resize(numEnvs_);
     centroidalModelRbdConversionsPtrs_.resize(numEnvs_);
     solutions_.resize(numEnvs_);
+    solutionsPerceptive_.resize(numEnvs_);
+    gridmapInterfacesPtrs_.resize(numEnvs_);
+    quadrupedInterfacePtrs_.resize(numEnvs_);
+    quadrupedSolverPtrs_.resize(numEnvs_);
+}
+
+// self.tbai_ocs2_interface.set_maps_from_flattened(flattened_maps, length_x, length_y, resolution, x_coords, y_coords)
+void TbaiIsaacGymInterface::setMapsFromFlattened(const torch::Tensor &flattenedMaps, scalar_t lengthX, scalar_t lengthY,
+                                                 scalar_t resolution, const torch::Tensor &xCoords,
+                                                 const torch::Tensor &yCoords, const torch::Tensor &envIds) {
+    TBAI_BINDINGS_ASSERT(flattenedMaps.size(0) == envIds.numel(), "Flattened maps and yCoords must have the same size");
+
+    auto updateImpl = [&](int i) {
+        int id = envIds[i].item<int>();
+        float x = xCoords[i].item<float>();
+        float y = yCoords[i].item<float>();
+        Eigen::VectorXf heights =
+            Eigen::Map<Eigen::VectorXf>(flattenedMaps[i].data_ptr<float>(), flattenedMaps.size(1));
+
+        gridmapInterfacesPtrs_[id]->updateFromFlattened(heights, lengthX, lengthY, resolution, x, y);
+
+        auto t1 = std::chrono::high_resolution_clock::now();
+        gridmapInterfacesPtrs_[id]->computeSegmentedPlanes();
+        auto t2 = std::chrono::high_resolution_clock::now();
+        if (id == 0) {
+            auto duration = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / 1e3;
+            std::cout << "Plane segmentation took " << duration << " ms." << std::endl;
+        }
+
+        // Set map for the quadruped solver
+        auto &quadrupedSolver = *quadrupedSolverPtrs_[id];
+        auto *quadrupedReference =
+            dynamic_cast<switched_model::SwitchedModelModeScheduleManager *>(&quadrupedSolver.getReferenceManager());
+        auto &planarTerrain = gridmapInterfacesPtrs_[id]->getPlanarTerrain();
+        std::unique_ptr<switched_model::TerrainModel> terrain =
+            std::make_unique<switched_model::SegmentedPlanesTerrainModel>(planarTerrain);
+        quadrupedReference->getTerrainModel().swap(terrain);
+
+        if (id == 0) {
+            std::cout << "Updated map for environment " << id << std::endl;
+        }
+    };
+    threadPool_.submit_loop(0, static_cast<int>(envIds.numel()), updateImpl).wait();
 }
 
 void TbaiIsaacGymInterface::allocateEigenBuffers() {
     TBAI_BINDINGS_ASSERT(interfacePtrs_[0] != nullptr, "Interfaces not initialized. Call createInterfaces first");
 
     currentStatesCpu_ = matrix_t::Zero(numEnvs_, 6 + 6 + 12);  // 6 momentum, 6 base pose, 12 joint angles
-    currentCommandsCpu_ = matrix_t::Zero(numEnvs_, 3);         // v_x, v_y, w_z
+    currentStatesPerceptiveCpu_ =
+        matrix_t::Zero(numEnvs_, 6 + 6 + 12 + 12);  // xyz euler angles, positoon, local angular velocity, local linear
+                                                    // velocity, joint angles, joint velocities
+    lastYawCpu_ = vector_t::Zero(numEnvs_);
+    currentCommandsCpu_ = matrix_t::Zero(numEnvs_, 3);  // v_x, v_y, w_z
 
     desiredBasePositionsCpu_ = matrix_t::Zero(numEnvs_, 3);
     desiredBaseOrientationsCpu_ = matrix_t::Zero(numEnvs_, 4);
@@ -194,6 +311,7 @@ void TbaiIsaacGymInterface::resetSolvers(scalar_t time, const torch::Tensor &env
             ->getGaitSchedule()
             ->insertModeSequenceTemplate(*modeSequenceTemplate_, time - horizon_, time + horizon_);
         updateInSeconds_[id] = 0.0;
+        lastYawCpu_[id] = 0.0;
     };
 
     threadPool_.submit_loop(0, static_cast<int>(envIds.numel()), resetSolver).wait();
@@ -322,13 +440,36 @@ void TbaiIsaacGymInterface::optimizeTrajectories(scalar_t time, const torch::Ten
         // std::cout << targetTrajectory << std::endl;
         // std::cout << std::endl;
         this->solverPtrs_[id]->getReferenceManager().setTargetTrajectories(targetTrajectory);
+        auto tt1 = std::chrono::high_resolution_clock::now();
         this->solverPtrs_[id]->run(initTime, initState, finalTime);
+        auto tt2 = std::chrono::high_resolution_clock::now();
         PrimalSolution temp;
         this->solverPtrs_[id]->getPrimalSolution(finalTime, &temp);
         this->consistencyRewards_.index({id}) = computeConsistencyReward(temp, this->solutions_[id]);
         this->solutions_[id].swap(temp);
         temp.clear();
         updateNextOptimizationTimeImpl(time, id);
+
+        // Optimize perceptive
+        auto &quadrupedInterface = *quadrupedInterfacePtrs_[id];
+        auto initStatePerceptive = currentStatesPerceptiveCpu_.row(id).head<6+6+12>();
+        auto targetTrajectoryPerceptive = getTargetTrajectoryPerceptive(time, id);
+        quadrupedSolverPtrs_[id]->getReferenceManager().setTargetTrajectories(targetTrajectoryPerceptive);
+        auto t1 = std::chrono::high_resolution_clock::now();
+        quadrupedSolverPtrs_[id]->run(initTime, initStatePerceptive, finalTime);
+        auto t2 = std::chrono::high_resolution_clock::now();
+        PrimalSolution tempPerceptive;
+        quadrupedSolverPtrs_[id]->getPrimalSolution(finalTime, &tempPerceptive);
+        scalar_t consistencyRewardPerceptive = computeConsistencyReward(tempPerceptive, solutionsPerceptive_[id]);
+        solutionsPerceptive_[id].swap(tempPerceptive);
+        tempPerceptive.clear();
+
+        if (id == 0) {
+            auto duration = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / 1e3;
+            auto duration2 = std::chrono::duration_cast<std::chrono::microseconds>(tt2 - tt1).count() / 1e3;
+            std::cout << "Optimization took " << duration2 << " ms." << std::endl;
+            std::cout << "Perceptive Optimization took " << duration << " ms." << std::endl;
+        }
     };
     threadPool_.submit_loop(0, static_cast<int>(envIds.numel()), optimize).wait();
 }
@@ -347,6 +488,9 @@ void TbaiIsaacGymInterface::updateCurrentDesiredJointAngles(scalar_t time, const
 
 void TbaiIsaacGymInterface::updateDesiredJointAngles(scalar_t time, const torch::Tensor &envIds) {
     // This function should only be called after updateTimeLeftInPhase
+
+    // Just change the getPinocchioJointPosition -> 
+
     auto impl = [&](int i) {
         int id = envIds[i].item<int>();
         auto &solution = solutions_[id];
@@ -486,6 +630,47 @@ TargetTrajectories TbaiIsaacGymInterface::getTargetTrajectory(scalar_t initTime,
     return TargetTrajectories(timeTrajectory, stateTrajectory, inputTrajectory);
 }
 
+TargetTrajectories TbaiIsaacGymInterface::getTargetTrajectoryPerceptive(scalar_t initTime, int envIdx) {
+    switched_model::BaseReferenceTrajectory baseReferenceTrajectory = generateExtrapolatedBaseReference(
+        getBaseReferenceHorizon(initTime, envIdx), getBaseReferenceState(initTime, envIdx),
+        getBaseReferenceCommand(initTime, envIdx), gridmapInterfacesPtrs_[envIdx]->getPlanarTerrain().gridMap, 0.53,
+        0.3);
+
+    constexpr size_t STATE_DIM = 6 + 6 + 12;
+    constexpr size_t INPUT_DIM = 12 + 12;
+
+    // Generate target trajectory
+    ocs2::scalar_array_t desiredTimeTrajectory = std::move(baseReferenceTrajectory.time);
+    const size_t N = desiredTimeTrajectory.size();
+    ocs2::vector_array_t desiredStateTrajectory(N);
+    ocs2::vector_array_t desiredInputTrajectory(N, ocs2::vector_t::Zero(INPUT_DIM));
+    for (size_t i = 0; i < N; ++i) {
+        ocs2::vector_t state = ocs2::vector_t::Zero(STATE_DIM);
+
+        // base orientation
+        state.head<3>() = baseReferenceTrajectory.eulerXyz[i];
+
+        auto Rt = switched_model::rotationMatrixOriginToBase(baseReferenceTrajectory.eulerXyz[i]);
+
+        // base position
+        state.segment<3>(3) = baseReferenceTrajectory.positionInWorld[i];
+
+        // base angular velocity
+        state.segment<3>(6) = Rt * baseReferenceTrajectory.angularVelocityInWorld[i];
+
+        // base linear velocity
+        state.segment<3>(9) = Rt * baseReferenceTrajectory.linearVelocityInWorld[i];
+
+        // joint angles
+        state.segment<12>(12) = quadrupedInterfacePtrs_[envIdx]->getInitialState().segment<12>(12);
+
+        desiredStateTrajectory[i] = std::move(state);
+    }
+
+    return TargetTrajectories(std::move(desiredTimeTrajectory), std::move(desiredStateTrajectory),
+                              std::move(desiredInputTrajectory));
+}
+
 PrimalSolution TbaiIsaacGymInterface::getCurrentOptimalTrajectory(int envId) const {
     return solutions_[envId];
 }
@@ -502,6 +687,26 @@ SystemObservation TbaiIsaacGymInterface::getCurrentObservation(scalar_t time, in
     SystemObservation observation;
     observation.state = currentState;
     observation.input = currentInput;
+    observation.time = currentTime;
+    observation.mode = current_mode;
+
+    return observation;
+}
+
+SystemObservation TbaiIsaacGymInterface::getCurrentObservationPerceptive(scalar_t time, int envId) const {
+    vector_t currentState = currentStatesPerceptiveCpu_.row(envId);
+    vector_t x = currentState.head<12 + 12>();
+    vector_t u = vector_t::Zero(12 + 12);
+    u.tail<12>() = currentState.tail<12>();
+    scalar_t currentTime = time;
+
+    auto &solution = solutions_[envId];
+    auto &modeSchedule = solution.modeSchedule_;
+    size_t current_mode = modeSchedule.modeAtTime(currentTime);
+
+    SystemObservation observation;
+    observation.state = x;
+    observation.input = u;
     observation.time = currentTime;
     observation.mode = current_mode;
 
@@ -588,6 +793,24 @@ void TbaiIsaacGymInterface::visualize(scalar_t time, torch::Tensor &state, int e
     std::copy(obsCpu.data(), obsCpu.data() + obsCpu.size(), std::back_inserter(msg.obs));
 
     pub_.publish(msg);
+
+    gridmapInterfacePtr_->computeSegmentedPlanes();
+    auto &planarTerrain = gridmapInterfacePtr_->getPlanarTerrain();
+    gridmapInterfacePtr_->visualizePlanarTerrain(planarTerrain);
+}
+
+void TbaiIsaacGymInterface::setMapFromFlattened(const torch::Tensor &flattenedMap, scalar_t length_x, scalar_t length_y,
+                                                scalar_t resolution, scalar_t x, scalar_t y) {
+    Eigen::VectorXf heights = tbai::bindings::torch2vector(flattenedMap).cast<float>();
+    const size_t Nx = length_x / resolution;
+    const size_t Ny = length_y / resolution;
+    Eigen::MatrixXf mapMatrix = Eigen::Map<Eigen::MatrixXf>(heights.data(), Nx, Ny);
+    auto &map = gridmapInterfacePtr_->getMap();
+    grid_map::Length length(length_x, length_y);
+    grid_map::Position position(x, y);
+    map.setGeometry(length, resolution, position);
+    map.setFrameId("odom");
+    map.add("elevation", mapMatrix);
 }
 
 void TbaiIsaacGymInterface::updateDesiredFootPositionsAndVelocities(scalar_t time, const torch::Tensor &envIds) {

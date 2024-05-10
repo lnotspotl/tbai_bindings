@@ -20,6 +20,9 @@
   <depend>ocs2_ros_interfaces</depend>
   <depend>pybind11_catkin</depend>
   <depend>message_runtime</depend>
+  <depend>gridmap_interface</depend>
+  <depend>perceptive_mpc</depend>
+  <depend>ocs2_anymal_commands</depend>
 
   <export>
   </export>

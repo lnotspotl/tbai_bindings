@@ -57,7 +57,10 @@ PYBIND11_MODULE(tbai_ocs2_interface, m) {
         .def("update_desired_foot_positions_and_velocities",
              &TbaiIsaacGymInterface::updateDesiredFootPositionsAndVelocities)
         .def("get_desired_foot_positions", &TbaiIsaacGymInterface::getDesiredFootPositions)
-        .def("get_desired_foot_velocities", &TbaiIsaacGymInterface::getDesiredFootVelocities);
+        .def("get_desired_foot_velocities", &TbaiIsaacGymInterface::getDesiredFootVelocities)
+        .def("set_map_from_flattened", &TbaiIsaacGymInterface::setMapFromFlattened)
+        .def("set_maps_from_flattened", &TbaiIsaacGymInterface::setMapsFromFlattened)
+        .def("update_states_perceptive", &TbaiIsaacGymInterface::updateCurrentStatesPerceptive);
 
     // Helper class
     py::class_<SystemObservation>(m, "SystemObservation");

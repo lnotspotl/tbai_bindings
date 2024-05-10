@@ -7,3 +7,9 @@
 [submodule "dependencies/ocs2_robotic_assets"]
 	path = dependencies/ocs2_robotic_assets
 	url = git@github.com:projectatctu/ocs2_robotic_assets.git
+[submodule "dependencies/grid_map"]
+	path = dependencies/grid_map
+	url = git@github.com:ANYbotics/grid_map.git
+[submodule "dependencies/elevation_mapping_cupy"]
+	path = dependencies/elevation_mapping_cupy
+	url = git@github.com:leggedrobotics/elevation_mapping_cupy.git

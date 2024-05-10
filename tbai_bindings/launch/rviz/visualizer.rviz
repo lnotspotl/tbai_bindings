@@ -468,6 +468,46 @@ Visualization Manager:
       Reference Frame: <Fixed Frame>
       Show Trail: false
       Value: true
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /boundaries
+      Name: MarkerArray
+      Namespaces:
+        "": true
+      Queue Size: 100
+      Value: true
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /insets
+      Name: MarkerArray
+      Namespaces:
+        "": true
+      Queue Size: 100
+      Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Class: grid_map_rviz_plugin/GridMap
+      Color: 200; 200; 200
+      Color Layer: elevation
+      Color Transformer: GridMapLayer
+      ColorMap: default
+      Enabled: false
+      Grid Cell Decimation: 1
+      Grid Line Thickness: 0.10000000149011612
+      Height Layer: elevation
+      Height Transformer: GridMapLayer
+      History Length: 1
+      Invert ColorMap: false
+      Max Color: 255; 255; 255
+      Max Intensity: 10
+      Min Color: 0; 0; 0
+      Min Intensity: 0
+      Name: GridMap
+      Show Grid Lines: true
+      Topic: /map
+      Unreliable: false
+      Use ColorMap: true
+      Value: false
   Enabled: true
   Global Options:
     Background Color: 255; 255; 255
@@ -496,7 +536,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 2.7202351093292236
+      Distance: 2.0765085220336914
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -504,17 +544,17 @@ Visualization Manager:
         Value: false
       Field of View: 0.7853981852531433
       Focal Point:
-        X: -1.8335274457931519
-        Y: 0.41831544041633606
-        Z: 1.129854440689087
+        X: -0.21063309907913208
+        Y: -4.341125011444092
+        Z: 0.4995516836643219
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.4653978943824768
+      Pitch: 0.2953977882862091
       Target Frame: <Fixed Frame>
-      Yaw: 2.6604068279266357
+      Yaw: 5.355416297912598
     Saved: ~
 Window Geometry:
   Displays:

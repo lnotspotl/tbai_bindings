@@ -17,6 +17,9 @@ find_package(catkin REQUIRED COMPONENTS
     ocs2_ros_interfaces
     ocs2_msgs
     message_generation
+    gridmap_interface
+    perceptive_mpc
+    ocs2_anymal_commands
 )
 set(CMAKE_CXX_STANDARD 17)
 
@@ -68,7 +71,7 @@ add_library(${PROJECT_NAME}
   src/Utils.cpp
   src/TbaiIsaacGymInterface.cpp
 )
-target_link_libraries(${PROJECT_NAME} ${catkin_LIBRARIES} ${TORCH_LIBRARIES} ${Python3_LIBRARIES} ${pinocchio_LIBRARIES} ${OTHER_LIBRARIES})
+target_link_libraries(${PROJECT_NAME} ${catkin_LIBRARIES} ${TORCH_LIBRARIES} ${Python3_LIBRARIES} ${pinocchio_LIBRARIES} ${OTHER_LIBRARIES} -lffi)
 pybind11_add_module(tbai_ocs2_interface SHARED
   src/TbaiIsaacGymInterfaceBindings.cpp
 )    
@@ -77,6 +80,7 @@ target_link_libraries(tbai_ocs2_interface PRIVATE
     ${Python_LIBRARIES}
     ${PROJECT_NAME}
     ${OTHER_LIBRARIES}
+    -lffi
 )
 
 add_executable(main src/main.cpp)
