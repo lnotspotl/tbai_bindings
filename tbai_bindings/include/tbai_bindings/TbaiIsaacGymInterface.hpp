@@ -55,8 +55,6 @@ class TbaiIsaacGymInterface {
     /** Public interface **/
     void resetAllSolvers(scalar_t time);
     void resetSolvers(scalar_t time, const torch::Tensor &envIds);
-    void updateCurrentStates(const torch::Tensor &newStates);
-    void updateCurrentStates(const torch::Tensor &newStates, const torch::Tensor &envIds);
     void updateCurrentStatesPerceptive(const torch::Tensor &newStates, const torch::Tensor &envIds);
     void updateOptimizedStates(scalar_t time);
     void updateOptimizedStates(scalar_t time, const torch::Tensor &envIds);
@@ -65,11 +63,11 @@ class TbaiIsaacGymInterface {
     void setCurrentCommand(const torch::Tensor &command, const torch::Tensor &envIds);
     void updateDesiredContacts(scalar_t time, const torch::Tensor &envIds);
     void updateTimeLeftInPhase(scalar_t time, const torch::Tensor &envIds);
-    void updateDesiredJointAngles(scalar_t time, const torch::Tensor &envIds);
-    void updateCurrentDesiredJointAngles(scalar_t time, const torch::Tensor &envIds);
+    void updateDesiredJointAnglesPerceptive(scalar_t time, const torch::Tensor &envIds);
+    void updateCurrentDesiredJointAnglesPerceptive(scalar_t time, const torch::Tensor &envIds);
     void updateNextOptimizationTime(scalar_t time, const torch::Tensor &envIds);
-    void updateDesiredBase(scalar_t time, const torch::Tensor &envIds);
-    void updateDesiredFootPositionsAndVelocities(scalar_t time, const torch::Tensor &envIds);
+    void updateDesiredBasePerceptive(scalar_t time, const torch::Tensor &envIds);
+    void updateDesiredFootPositionsAndVelocitiesPerceptive(scalar_t time, const torch::Tensor &envIds);
     void moveDesiredBaseToGpu();
 
     /** Getters **/
@@ -93,8 +91,6 @@ class TbaiIsaacGymInterface {
     void visualize(scalar_t time, torch::Tensor &state, int envId, torch::Tensor &obs);
 
     PrimalSolution getCurrentOptimalTrajectory(int envId) const;
-    SystemObservation getCurrentObservation(scalar_t time, int envId) const;
-    SystemObservation getCurrentObservationPerceptive(scalar_t time, int envId) const;
 
     BaseReferenceHorizon getBaseReferenceHorizon(scalar_t time, int envId) { return {0.1, 10}; }
 
@@ -135,8 +131,6 @@ class TbaiIsaacGymInterface {
     void allocateEigenBuffers();
     void allocateTorchBuffers();
 
-    const LeggedRobotInterface &getInterface(int i) const;
-
     void loadModeSequenceTemplates(const std::string &gaitFile, const std::string &gaitName);
 
     void createInterfaces(const std::string &taskFile, const std::string &urdfFile, const std::string &referenceFile);
@@ -144,7 +138,6 @@ class TbaiIsaacGymInterface {
     void updateNextOptimizationTimeImpl(scalar_t time, int envId);
     scalar_t computeConsistencyReward(const PrimalSolution &previousSolution, const PrimalSolution &currentSolution);
 
-    TargetTrajectories getTargetTrajectory(scalar_t initTime, int envIdx);
     TargetTrajectories getTargetTrajectoryPerceptive(scalar_t initTime, int envIdx);
 
     int numEnvs_;
@@ -156,19 +149,14 @@ class TbaiIsaacGymInterface {
     matrix_t currentCommandsCpu_;
     torch::Tensor optimizedStates_;
     torch::Tensor consistencyRewards_;
-    std::vector<PrimalSolution> solutions_;
     std::vector<PrimalSolution> solutionsPerceptive_;
 
-    std::vector<std::unique_ptr<LeggedRobotInterface>> interfacePtrs_;
-    std::vector<std::unique_ptr<SqpSolver>> solverPtrs_;
-    std::vector<std::unique_ptr<PinocchioInterface>> pinocchioInterfacePtrs_;
-    std::vector<std::unique_ptr<PinocchioEndEffectorKinematics>> endEffectorKinematicsPtrs_;
-    std::vector<std::unique_ptr<CentroidalModelPinocchioMapping>> centroidalModelMappingPtrs_;
-    std::vector<std::unique_ptr<CentroidalModelRbdConversions>> centroidalModelRbdConversionsPtrs_;
     std::vector<std::unique_ptr<GridmapInterface>> gridmapInterfacesPtrs_;
-
     std::vector<std::unique_ptr<switched_model::QuadrupedInterface>> quadrupedInterfacePtrs_;
     std::vector<std::unique_ptr<SqpSolver>> quadrupedSolverPtrs_;
+    std::vector<std::unique_ptr<switched_model::ComModelBase<scalar_t>>> comModelPtrs_;
+    std::vector<std::unique_ptr<switched_model::KinematicsModelBase<scalar_t>>> kinematicsPtrs_;
+    switched_model::Gait gait_;
 
     torch::Tensor currentStates_;
     torch::Tensor currentCommands_;
@@ -218,7 +206,7 @@ class TbaiIsaacGymInterface {
     // MPC horizon in seconds
     scalar_t horizon_;
 
-    std::unique_ptr<ocs2::legged_robot::ModeSequenceTemplate> modeSequenceTemplate_;
+    std::unique_ptr<switched_model::ModeSequenceTemplate> modeSequenceTemplate_;
     std::unique_ptr<GridmapInterface> gridmapInterfacePtr_;
 
     ros::Publisher pub_;

@@ -23,7 +23,7 @@ void GridmapInterface::setupPlaneDecompositionPipeline() {
 
     // These values are simply taken from the config file
     // https://github.com/leggedrobotics/elevation_mapping_cupy/blob/0126df19f0d3a57f940eb08e4481d9feed52ef51/plane_segmentation/convex_plane_decomposition_ros/config/parameters.yaml
-    config.preprocessingParameters.resolution = 0.1;
+    config.preprocessingParameters.resolution = 0.02;
     config.preprocessingParameters.kernelSize = 3;
     config.preprocessingParameters.numberOfRepeats = 1;
 

@@ -17,12 +17,6 @@ PYBIND11_MODULE(tbai_ocs2_interface, m) {
              "device"_a, "visualize"_a)
         .def("reset_solvers", &TbaiIsaacGymInterface::resetSolvers, "time"_a, "envIds"_a)
         .def("reset_all_solvers", &TbaiIsaacGymInterface::resetAllSolvers, "time"_a)
-        .def("update_states",
-             py::overload_cast<const torch::Tensor &, const torch::Tensor &>(
-                 &TbaiIsaacGymInterface::updateCurrentStates),
-             "new_states"_a, "env_ids"_a)
-        .def("update_all_states", py::overload_cast<const torch::Tensor &>(&TbaiIsaacGymInterface::updateCurrentStates),
-             "new_states"_a)
         .def("optimize_trajectories", py::overload_cast<scalar_t>(&TbaiIsaacGymInterface::optimizeTrajectories))
         .def("optimize_trajectories",
              py::overload_cast<scalar_t, const torch::Tensor &>(&TbaiIsaacGymInterface::optimizeTrajectories))
@@ -33,16 +27,14 @@ PYBIND11_MODULE(tbai_ocs2_interface, m) {
         .def("set_current_command", &TbaiIsaacGymInterface::setCurrentCommand)
         .def("update_desired_contacts", &TbaiIsaacGymInterface::updateDesiredContacts)
         .def("update_time_left_in_phase", &TbaiIsaacGymInterface::updateTimeLeftInPhase)
-        .def("update_desired_joint_angles", &TbaiIsaacGymInterface::updateDesiredJointAngles)
+        .def("update_desired_joint_angles", &TbaiIsaacGymInterface::updateDesiredJointAnglesPerceptive)
         .def("updated_in_seconds", &TbaiIsaacGymInterface::getUpdatedInSeconds)
         .def("get_consistency_reward", &TbaiIsaacGymInterface::getConsistencyReward)
         .def("get_planar_footholds", &TbaiIsaacGymInterface::getPlanarFootHolds)
         .def("get_desired_joint_positions", &TbaiIsaacGymInterface::getDesiredJointPositions)
         .def("get_desired_contacts", &TbaiIsaacGymInterface::getDesiredContacts)
         .def("get_time_left_in_phase", &TbaiIsaacGymInterface::getTimeLeftInPhase)
-        .def("get_current_observation", &TbaiIsaacGymInterface::getCurrentObservation)
-        .def("get_current_optimal_trajectory", &TbaiIsaacGymInterface::getCurrentOptimalTrajectory)
-        .def("update_current_desired_joint_angles", &TbaiIsaacGymInterface::updateCurrentDesiredJointAngles)
+        .def("update_current_desired_joint_angles", &TbaiIsaacGymInterface::updateCurrentDesiredJointAnglesPerceptive)
         .def("get_current_desired_joint_positions", &TbaiIsaacGymInterface::getCurrentDesiredJointPositions)
         .def("get_desired_base_positions", &TbaiIsaacGymInterface::getDesiredBasePositions)
         .def("get_desired_base_orientations", &TbaiIsaacGymInterface::getDesiredBaseOrientations)
@@ -50,12 +42,12 @@ PYBIND11_MODULE(tbai_ocs2_interface, m) {
         .def("get_desired_base_angular_velocities", &TbaiIsaacGymInterface::getDesiredBaseAngularVelocities)
         .def("get_desired_base_linear_accelerations", &TbaiIsaacGymInterface::getDesiredBaseLinearAccelerations)
         .def("get_desired_base_angular_accelerations", &TbaiIsaacGymInterface::getDesiredBaseAngularAccelerations)
-        .def("update_desired_base", &TbaiIsaacGymInterface::updateDesiredBase)
+        .def("update_desired_base", &TbaiIsaacGymInterface::updateDesiredBasePerceptive)
         .def("move_desired_base_to_gpu", &TbaiIsaacGymInterface::moveDesiredBaseToGpu)
         .def("visualize", &TbaiIsaacGymInterface::visualize, "time"_a, "state"_a, "envId"_a, "obs"_a)
         .def("get_bobnet_phases", &TbaiIsaacGymInterface::getBobnetPhases)
         .def("update_desired_foot_positions_and_velocities",
-             &TbaiIsaacGymInterface::updateDesiredFootPositionsAndVelocities)
+             &TbaiIsaacGymInterface::updateDesiredFootPositionsAndVelocitiesPerceptive)
         .def("get_desired_foot_positions", &TbaiIsaacGymInterface::getDesiredFootPositions)
         .def("get_desired_foot_velocities", &TbaiIsaacGymInterface::getDesiredFootVelocities)
         .def("set_map_from_flattened", &TbaiIsaacGymInterface::setMapFromFlattened)
