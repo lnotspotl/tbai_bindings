@@ -83,9 +83,6 @@ target_link_libraries(tbai_ocs2_interface PRIVATE
     -lffi
 )
 
-add_executable(main src/main.cpp)
-target_link_libraries(main ${PROJECT_NAME})
-
 add_executable(visualizer src/visualizer.cpp)
 target_link_libraries(visualizer ${PROJECT_NAME})
 
