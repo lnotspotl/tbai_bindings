@@ -508,7 +508,7 @@ void TbaiIsaacGymInterface::updateDesiredBasePerceptive(scalar_t time, const tor
         auto basePoseOcs2 = switched_model::getBasePose(desiredState);
         auto jointAnglesOcs2 = switched_model::getJointPositions(desiredState);
         auto baseVelocityOcs2 = switched_model::getBaseLocalVelocities(desiredState);
-        auto jointVelocitiesOcs2 = switched_model::getJointVelocities(desiredState);
+        auto jointVelocitiesOcs2 = switched_model::getJointVelocities(desiredInput);
 
         auto qPinocchio = quadcom.getPinnochioConfiguration(basePoseOcs2, jointAnglesOcs2);
         auto vPinocchio = quadcom.getPinnochioVelocity(baseVelocityOcs2, jointVelocitiesOcs2);
@@ -638,6 +638,7 @@ void TbaiIsaacGymInterface::updateDesiredFootPositionsAndVelocitiesPerceptive(sc
         auto &quadcom = *quadcomPtr;
         auto &kin = *kinematicsPtrs_[id];
         auto state = LinearInterpolation::interpolate(time, solution.timeTrajectory_, solution.stateTrajectory_);
+        auto input = LinearInterpolation::interpolate(time, solution.timeTrajectory_, solution.inputTrajectory_);
         auto basePoseOcs2 = switched_model::getBasePose(state);
         auto baseTwistOcs2 = switched_model::getBaseLocalVelocities(state);
         auto jointAnglesOcs2 = switched_model::getJointPositions(state);
